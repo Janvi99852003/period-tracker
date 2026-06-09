@@ -5,9 +5,9 @@ const STORAGE_KEY = "cyra_data";
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : { periods: [], notes: {} };
+    return raw ? JSON.parse(raw) : { periods: [], notes: {}, moods: {}, flows: {}, symptoms: {} };
   } catch {
-    return { periods: [], notes: {} };
+    return { periods: [], notes: {}, moods: {}, flows: {}, symptoms: {} };
   }
 }
 
@@ -31,6 +31,21 @@ const MONTHS = ["January","February","March","April","May","June",
   "July","August","September","October","November","December"];
 const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 
+const MOODS = [
+  { emoji: "😊", label: "Happy" },
+  { emoji: "😔", label: "Sad" },
+  { emoji: "😤", label: "Irritable" },
+  { emoji: "😴", label: "Tired" },
+  { emoji: "😌", label: "Calm" },
+];
+
+const SYMPTOMS_LIST = [
+  "Cramps", "Bloating", "Headache", "Fatigue",
+  "Nausea", "Back pain", "Tender breasts", "Acne"
+];
+
+const FLOW_LEVELS = ["Light", "Medium", "Heavy"];
+
 export default function App() {
   const today = new Date();
   const [data, setData] = useState(loadData);
@@ -41,10 +56,14 @@ export default function App() {
   const [showModal, setShowModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
   const [noteText, setNoteText] = useState("");
+  const [selectedMood, setSelectedMood] = useState(null);
+  const [selectedFlow, setSelectedFlow] = useState(null);
+  const [selectedSymptoms, setSelectedSymptoms] = useState([]);
   const [activeTab, setActiveTab] = useState("calendar");
 
   useEffect(() => { saveData(data); }, [data]);
 
+  // ── Period dates set ──────────────────────────────────────────────────────
   const periodDates = new Set();
   data.periods.forEach(({ start, end }) => {
     const s = new Date(start);
@@ -54,6 +73,7 @@ export default function App() {
     }
   });
 
+  // ── Prediction ────────────────────────────────────────────────────────────
   function getPrediction() {
     if (data.periods.length < 2) return null;
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
@@ -88,6 +108,24 @@ export default function App() {
     }
   }
 
+  // ── Symptom stats ─────────────────────────────────────────────────────────
+  function getSymptomStats() {
+    const counts = {};
+    Object.values(data.symptoms || {}).forEach(arr => {
+      arr.forEach(s => { counts[s] = (counts[s] || 0) + 1; });
+    });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }
+
+  function getMoodStats() {
+    const counts = {};
+    Object.values(data.moods || {}).forEach(m => {
+      counts[m] = (counts[m] || 0) + 1;
+    });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }
+
+  // ── Navigation ────────────────────────────────────────────────────────────
   function prevMonth() {
     if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
     else setViewMonth(m => m - 1);
@@ -97,6 +135,7 @@ export default function App() {
     else setViewMonth(m => m + 1);
   }
 
+  // ── Date click ────────────────────────────────────────────────────────────
   function handleDateClick(dateStr) {
     if (markingMode) {
       if (!rangeStart) { setRangeStart(dateStr); return; }
@@ -108,12 +147,27 @@ export default function App() {
       return;
     }
     setSelectedDate(dateStr);
-    setNoteText(data.notes[dateStr] || "");
+    setNoteText(data.notes?.[dateStr] || "");
+    setSelectedMood(data.moods?.[dateStr] || null);
+    setSelectedFlow(data.flows?.[dateStr] || null);
+    setSelectedSymptoms(data.symptoms?.[dateStr] || []);
     setShowModal(true);
   }
 
-  function saveNote() {
-    setData(prev => ({ ...prev, notes: { ...prev.notes, [selectedDate]: noteText } }));
+  function toggleSymptom(s) {
+    setSelectedSymptoms(prev =>
+      prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+    );
+  }
+
+  function saveLog() {
+    setData(prev => ({
+      ...prev,
+      notes:    { ...prev.notes,    [selectedDate]: noteText },
+      moods:    { ...prev.moods,    [selectedDate]: selectedMood },
+      flows:    { ...prev.flows,    [selectedDate]: selectedFlow },
+      symptoms: { ...prev.symptoms, [selectedDate]: selectedSymptoms },
+    }));
     setShowModal(false);
   }
 
@@ -132,73 +186,131 @@ export default function App() {
   const firstDay = getFirstDayOfMonth(viewYear, viewMonth);
   const todayStr = toDateStr(today);
   const daysUntil = prediction ? Math.ceil((prediction.date - today) / 86400000) : null;
+  const symptomStats = getSymptomStats();
+  const moodStats = getMoodStats();
+  const totalLogged = Object.keys(data.moods || {}).length + Object.keys(data.symptoms || {}).length;
 
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0f0a14; color: #f0eaf8; font-family: 'DM Sans', sans-serif; min-height: 100vh; }
-        .app { max-width: 420px; margin: 0 auto; min-height: 100vh; background: #0f0a14; position: relative; overflow-x: hidden; }
-        .app::before { content: ''; position: fixed; top: -100px; left: 50%; transform: translateX(-50%); width: 500px; height: 400px; background: radial-gradient(ellipse, rgba(180,100,255,0.15) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+        body { background: #1a0a10; color: #fdf0f5; font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+        .app { max-width: 420px; margin: 0 auto; min-height: 100vh; background: #1a0a10; position: relative; overflow-x: hidden; }
+        .app::before { content: ''; position: fixed; top: -80px; left: 50%; transform: translateX(-50%); width: 500px; height: 380px; background: radial-gradient(ellipse, rgba(236,72,153,0.18) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+
+        /* Header */
         .header { padding: 20px 20px 0; position: relative; z-index: 1; }
         .header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-        .logo { font-family: 'DM Serif Display', serif; font-size: 26px; background: linear-gradient(135deg, #e879f9, #a855f7, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-        .log-btn { background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; border: none; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: opacity 0.2s; display: flex; align-items: center; gap: 6px; }
+        .logo { font-family: 'DM Serif Display', serif; font-size: 28px; background: linear-gradient(135deg, #fb7185, #ec4899, #f43f5e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .log-btn { background: linear-gradient(135deg, #ec4899, #be185d); color: #fff; border: none; border-radius: 20px; padding: 8px 18px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: opacity 0.2s; display: flex; align-items: center; gap: 6px; }
         .log-btn:hover { opacity: 0.85; }
-        .log-btn.active { background: linear-gradient(135deg, #ec4899, #a855f7); }
-        .hero { background: linear-gradient(135deg, rgba(168,85,247,0.15), rgba(236,72,153,0.1)); border: 1px solid rgba(168,85,247,0.2); border-radius: 20px; padding: 20px; margin-bottom: 20px; position: relative; overflow: hidden; }
-        .hero::after { content: '🌙'; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); font-size: 48px; opacity: 0.15; }
-        .hero-label { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; color: #a855f7; margin-bottom: 6px; }
-        .hero-number { font-family: 'DM Serif Display', serif; font-size: 52px; line-height: 1; background: linear-gradient(135deg, #e879f9, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 4px; }
-        .hero-sub { font-size: 13px; color: rgba(240,234,248,0.5); }
-        .hero-empty { font-size: 14px; color: rgba(240,234,248,0.5); line-height: 1.6; }
-        .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-        .stat { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); border-radius: 14px; padding: 14px 10px; text-align: center; }
-        .stat-num { font-family: 'DM Serif Display', serif; font-size: 24px; color: #e879f9; line-height: 1; margin-bottom: 4px; }
-        .stat-label { font-size: 10px; color: rgba(240,234,248,0.4); text-transform: uppercase; letter-spacing: 0.05em; }
-        .cal-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 20px; padding: 16px; margin-bottom: 20px; }
+        .log-btn.active { background: linear-gradient(135deg, #f43f5e, #ec4899); }
+
+        /* Hero */
+        .hero { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(244,63,94,0.1)); border: 1px solid rgba(236,72,153,0.25); border-radius: 22px; padding: 22px; margin-bottom: 16px; position: relative; overflow: hidden; }
+        .hero::after { content: '🌸'; position: absolute; right: 18px; top: 50%; transform: translateY(-50%); font-size: 52px; opacity: 0.18; }
+        .hero-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: #fb7185; margin-bottom: 6px; }
+        .hero-number { font-family: 'DM Serif Display', serif; font-size: 56px; line-height: 1; background: linear-gradient(135deg, #fb7185, #f43f5e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 4px; }
+        .hero-sub { font-size: 13px; color: rgba(253,240,245,0.5); }
+        .hero-empty { font-size: 14px; color: rgba(253,240,245,0.45); line-height: 1.6; }
+
+        /* Stats */
+        .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+        .stat { background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 16px; padding: 14px 10px; text-align: center; }
+        .stat-num { font-family: 'DM Serif Display', serif; font-size: 26px; color: #fb7185; line-height: 1; margin-bottom: 4px; }
+        .stat-label { font-size: 10px; color: rgba(253,240,245,0.4); text-transform: uppercase; letter-spacing: 0.06em; }
+
+        /* Calendar */
+        .cal-card { background: rgba(236,72,153,0.05); border: 1px solid rgba(236,72,153,0.12); border-radius: 22px; padding: 18px; margin-bottom: 18px; }
         .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-        .cal-nav-btn { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: rgba(240,234,248,0.7); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-        .cal-nav-btn:hover { background: rgba(168,85,247,0.2); border-color: rgba(168,85,247,0.4); }
-        .cal-month { font-size: 15px; font-weight: 500; color: #f0eaf8; }
+        .cal-nav-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(236,72,153,0.2); background: rgba(236,72,153,0.08); color: #fb7185; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .cal-nav-btn:hover { background: rgba(236,72,153,0.2); border-color: rgba(236,72,153,0.4); }
+        .cal-month { font-size: 15px; font-weight: 500; color: #fdf0f5; }
         .day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-        .day-name { text-align: center; font-size: 10px; font-weight: 600; color: rgba(240,234,248,0.3); padding: 4px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .day-cell { aspect-ratio: 1; border-radius: 10px; border: 1px solid transparent; background: transparent; color: rgba(240,234,248,0.7); font-size: 12px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; position: relative; min-height: 36px; }
-        .day-cell:hover { background: rgba(168,85,247,0.15); color: #f0eaf8; }
-        .day-cell.is-period { background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(168,85,247,0.2)); color: #f9a8d4; border-color: rgba(236,72,153,0.3); }
-        .day-cell.is-predicted { background: rgba(251,191,36,0.1); color: #fcd34d; border-color: rgba(251,191,36,0.2); border-style: dashed; }
-        .day-cell.is-ovulation { background: rgba(52,211,153,0.1); color: #6ee7b7; border-color: rgba(52,211,153,0.2); }
-        .day-cell.is-today { border-color: #a855f7 !important; color: #e879f9 !important; font-weight: 600; }
-        .day-cell.is-range-start { background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; border-color: transparent; }
-        .note-dot { position: absolute; bottom: 4px; right: 4px; width: 4px; height: 4px; border-radius: 50%; background: #a855f7; }
-        .legend { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); margin-top: 10px; }
-        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(240,234,248,0.4); }
+        .day-name { text-align: center; font-size: 10px; font-weight: 600; color: rgba(253,240,245,0.3); padding: 4px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .day-cell { aspect-ratio: 1; border-radius: 10px; border: 1px solid transparent; background: transparent; color: rgba(253,240,245,0.65); font-size: 12px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; position: relative; min-height: 36px; flex-direction: column; gap: 1px; }
+        .day-cell:hover { background: rgba(236,72,153,0.15); color: #fdf0f5; }
+        .day-cell.is-period { background: linear-gradient(135deg, rgba(236,72,153,0.4), rgba(244,63,94,0.25)); color: #fda4af; border-color: rgba(236,72,153,0.35); }
+        .day-cell.is-predicted { background: rgba(251,191,36,0.1); color: #fcd34d; border: 1px dashed rgba(251,191,36,0.35); }
+        .day-cell.is-ovulation { background: rgba(52,211,153,0.1); color: #6ee7b7; border-color: rgba(52,211,153,0.25); }
+        .day-cell.is-today { border-color: #ec4899 !important; color: #fb7185 !important; font-weight: 600; }
+        .day-cell.is-range-start { background: linear-gradient(135deg, #ec4899, #be185d); color: #fff; border-color: transparent; }
+        .day-mood { font-size: 8px; line-height: 1; }
+        .note-dot { position: absolute; bottom: 3px; right: 3px; width: 4px; height: 4px; border-radius: 50%; background: #fb7185; }
+        .legend { display: flex; gap: 14px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid rgba(236,72,153,0.1); margin-top: 10px; }
+        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(253,240,245,0.4); }
         .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
-        .mode-banner { background: linear-gradient(135deg, rgba(168,85,247,0.2), rgba(236,72,153,0.15)); border: 1px solid rgba(168,85,247,0.3); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #d8b4fe; }
-        .cancel-btn { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px 10px; color: rgba(240,234,248,0.6); font-size: 12px; cursor: pointer; font-family: inherit; }
-        .tab-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 420px; background: rgba(15,10,20,0.95); backdrop-filter: blur(20px); border-top: 1px solid rgba(255,255,255,0.07); display: flex; z-index: 10; }
-        .tab { flex: 1; padding: 12px 0 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; cursor: pointer; font-family: inherit; color: rgba(240,234,248,0.35); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
-        .tab.active { color: #a855f7; }
+
+        /* Mode banner */
+        .mode-banner { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(244,63,94,0.12)); border: 1px solid rgba(236,72,153,0.3); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #fda4af; }
+        .cancel-btn { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px 12px; color: rgba(253,240,245,0.55); font-size: 12px; cursor: pointer; font-family: inherit; }
+
+        /* Tab bar */
+        .tab-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 420px; background: rgba(26,10,16,0.96); backdrop-filter: blur(20px); border-top: 1px solid rgba(236,72,153,0.12); display: flex; z-index: 10; }
+        .tab { flex: 1; padding: 12px 0 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; cursor: pointer; font-family: inherit; color: rgba(253,240,245,0.3); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
+        .tab.active { color: #ec4899; }
         .tab-icon { font-size: 20px; line-height: 1; }
-        .insights { padding: 0 0 100px; }
-        .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(240,234,248,0.35); margin-bottom: 12px; }
-        .insight-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; }
-        .insight-icon { font-size: 24px; flex-shrink: 0; width: 44px; height: 44px; background: rgba(168,85,247,0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
-        .insight-title { font-size: 14px; font-weight: 500; color: #f0eaf8; margin-bottom: 3px; }
-        .insight-sub { font-size: 12px; color: rgba(240,234,248,0.45); line-height: 1.5; }
-        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
-        .modal { background: #1a1025; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px 24px 0 0; padding: 24px 20px 40px; width: 100%; max-width: 420px; }
-        .modal-handle { width: 36px; height: 4px; background: rgba(255,255,255,0.15); border-radius: 2px; margin: 0 auto 20px; }
-        .modal-date { font-family: 'DM Serif Display', serif; font-size: 20px; color: #e879f9; margin-bottom: 16px; }
-        .modal-textarea { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 12px 14px; color: #f0eaf8; font-family: inherit; font-size: 14px; resize: none; outline: none; line-height: 1.6; margin-bottom: 12px; }
-        .modal-textarea:focus { border-color: rgba(168,85,247,0.5); }
-        .modal-textarea::placeholder { color: rgba(240,234,248,0.25); }
+
+        /* Insights & Symptoms tabs */
+        .tab-content { padding: 0 0 100px; }
+        .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(253,240,245,0.3); margin-bottom: 12px; margin-top: 8px; }
+        .insight-card { background: rgba(236,72,153,0.05); border: 1px solid rgba(236,72,153,0.1); border-radius: 18px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; }
+        .insight-icon { font-size: 22px; flex-shrink: 0; width: 44px; height: 44px; background: rgba(236,72,153,0.12); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+        .insight-title { font-size: 14px; font-weight: 500; color: #fdf0f5; margin-bottom: 3px; }
+        .insight-sub { font-size: 12px; color: rgba(253,240,245,0.45); line-height: 1.5; }
+
+        /* Symptom bar */
+        .symptom-row { margin-bottom: 10px; }
+        .symptom-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .symptom-name { font-size: 13px; color: #fdf0f5; }
+        .symptom-count { font-size: 12px; color: rgba(253,240,245,0.4); }
+        .symptom-bar-bg { background: rgba(236,72,153,0.1); border-radius: 4px; height: 6px; width: 100%; }
+        .symptom-bar-fill { background: linear-gradient(90deg, #ec4899, #fb7185); border-radius: 4px; height: 6px; transition: width 0.5s ease; }
+
+        /* Mood row */
+        .mood-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+        .mood-chip { background: rgba(236,72,153,0.07); border: 1px solid rgba(236,72,153,0.12); border-radius: 20px; padding: 6px 12px; font-size: 13px; color: rgba(253,240,245,0.7); display: flex; align-items: center; gap: 6px; }
+
+        /* Modal */
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px); display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
+        .modal { background: #2a0e1a; border: 1px solid rgba(236,72,153,0.15); border-radius: 26px 26px 0 0; padding: 20px 20px 44px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; }
+        .modal-handle { width: 36px; height: 4px; background: rgba(236,72,153,0.25); border-radius: 2px; margin: 0 auto 16px; }
+        .modal-date { font-family: 'DM Serif Display', serif; font-size: 20px; color: #fb7185; margin-bottom: 16px; }
+
+        /* Mood picker */
+        .modal-section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(253,240,245,0.35); margin-bottom: 8px; }
+        .mood-picker { display: flex; gap: 8px; margin-bottom: 16px; }
+        .mood-btn { flex: 1; background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 12px; padding: 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+        .mood-btn.selected { background: rgba(236,72,153,0.2); border-color: #ec4899; }
+        .mood-emoji { font-size: 20px; }
+        .mood-label { font-size: 9px; color: rgba(253,240,245,0.45); text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* Flow picker */
+        .flow-picker { display: flex; gap: 8px; margin-bottom: 16px; }
+        .flow-btn { flex: 1; background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 12px; padding: 9px 4px; font-size: 13px; color: rgba(253,240,245,0.6); cursor: pointer; font-family: inherit; transition: all 0.15s; text-align: center; }
+        .flow-btn.selected { background: rgba(236,72,153,0.2); border-color: #ec4899; color: #fda4af; font-weight: 500; }
+
+        /* Symptom picker */
+        .symptom-picker { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+        .symptom-btn { background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 20px; padding: 6px 12px; font-size: 12px; color: rgba(253,240,245,0.6); cursor: pointer; font-family: inherit; transition: all 0.15s; }
+        .symptom-btn.selected { background: rgba(236,72,153,0.22); border-color: #ec4899; color: #fda4af; }
+
+        /* Note textarea */
+        .modal-textarea { width: 100%; background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.15); border-radius: 14px; padding: 12px 14px; color: #fdf0f5; font-family: inherit; font-size: 14px; resize: none; outline: none; line-height: 1.6; margin-bottom: 12px; }
+        .modal-textarea:focus { border-color: rgba(236,72,153,0.45); }
+        .modal-textarea::placeholder { color: rgba(253,240,245,0.22); }
+
+        /* Buttons */
         .modal-actions { display: flex; gap: 10px; }
-        .btn-primary { flex: 1; background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; border: none; border-radius: 12px; padding: 12px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
-        .btn-secondary { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 16px; color: rgba(240,234,248,0.6); font-size: 14px; cursor: pointer; font-family: inherit; }
-        .btn-danger { width: 100%; background: rgba(236,72,153,0.1); border: 1px solid rgba(236,72,153,0.2); border-radius: 12px; padding: 11px; color: #f9a8d4; font-size: 13px; cursor: pointer; font-family: inherit; margin-bottom: 10px; }
+        .btn-primary { flex: 1; background: linear-gradient(135deg, #ec4899, #be185d); color: #fff; border: none; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
+        .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 14px; padding: 13px 18px; color: rgba(253,240,245,0.5); font-size: 14px; cursor: pointer; font-family: inherit; }
+        .btn-danger { width: 100%; background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.2); border-radius: 12px; padding: 11px; color: #fda4af; font-size: 13px; cursor: pointer; font-family: inherit; margin-bottom: 12px; }
+        .divider { border: none; border-top: 1px solid rgba(236,72,153,0.1); margin: 12px 0; }
+
         .main-content { padding: 0 16px 100px; position: relative; z-index: 1; }
+        .empty-state { text-align: center; padding: 40px 20px; color: rgba(253,240,245,0.35); font-size: 14px; line-height: 1.8; }
+        .empty-icon { font-size: 36px; margin-bottom: 12px; }
       `}</style>
 
       <div className="app">
@@ -220,6 +332,7 @@ export default function App() {
             </div>
           )}
 
+          {/* ── CALENDAR TAB ── */}
           {activeTab === "calendar" && (
             <>
               <div className="hero">
@@ -232,7 +345,7 @@ export default function App() {
                 ) : (
                   <>
                     <div className="hero-label">Welcome to Cyra</div>
-                    <div className="hero-empty">Log two or more cycles to see your predictions and insights.</div>
+                    <div className="hero-empty">Log two or more cycles to unlock predictions and insights.</div>
                   </>
                 )}
               </div>
@@ -247,7 +360,7 @@ export default function App() {
                   <div className="stat-label">Avg days</div>
                 </div>
                 <div className="stat">
-                  <div className="stat-num">{periodDates.size}</div>
+                  <div className="stat-num">{totalLogged}</div>
                   <div className="stat-label">Logged</div>
                 </div>
               </div>
@@ -271,30 +384,82 @@ export default function App() {
                     else if (ovulationDates.has(ds)) cls += " is-ovulation";
                     if (ds === todayStr) cls += " is-today";
                     if (rangeStart === ds) cls += " is-range-start";
+                    const mood = data.moods?.[ds];
                     return (
                       <button key={ds} className={cls} onClick={() => handleDateClick(ds)}>
                         {day}
-                        {data.notes[ds] && <span className="note-dot" />}
+                        {mood && <span className="day-mood">{MOODS.find(m => m.label === mood)?.emoji}</span>}
+                        {data.notes?.[ds] && <span className="note-dot" />}
                       </button>
                     );
                   })}
                 </div>
                 <div className="legend">
-                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(236,72,153,0.5)" }} />Period</div>
-                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(251,191,36,0.3)", border: "1px dashed rgba(251,191,36,0.5)" }} />Predicted</div>
-                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(52,211,153,0.3)" }} />Fertile</div>
+                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(236,72,153,0.55)" }} />Period</div>
+                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(251,191,36,0.35)", border: "1px dashed rgba(251,191,36,0.5)" }} />Predicted</div>
+                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(52,211,153,0.35)" }} />Fertile</div>
                 </div>
               </div>
             </>
           )}
 
+          {/* ── SYMPTOMS TAB ── */}
+          {activeTab === "symptoms" && (
+            <div className="tab-content">
+              <div className="section-title">Mood history</div>
+              {moodStats.length > 0 ? (
+                <div className="mood-row">
+                  {moodStats.map(([mood, count]) => {
+                    const m = MOODS.find(x => x.label === mood);
+                    return (
+                      <div key={mood} className="mood-chip">
+                        {m?.emoji} {mood} <span style={{ color: "#fb7185", fontWeight: 600 }}>×{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <div className="empty-icon">😊</div>
+                  No moods logged yet.<br />Tap any date on the calendar to log how you feel.
+                </div>
+              )}
+
+              <div className="section-title" style={{ marginTop: 20 }}>Most common symptoms</div>
+              {symptomStats.length > 0 ? (
+                <>
+                  {symptomStats.map(([symptom, count]) => (
+                    <div key={symptom} className="symptom-row">
+                      <div className="symptom-row-top">
+                        <span className="symptom-name">{symptom}</span>
+                        <span className="symptom-count">{count} {count === 1 ? "time" : "times"}</span>
+                      </div>
+                      <div className="symptom-bar-bg">
+                        <div
+                          className="symptom-bar-fill"
+                          style={{ width: `${Math.min(100, (count / (symptomStats[0][1])) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="empty-state">
+                  <div className="empty-icon">💊</div>
+                  No symptoms logged yet.<br />Tap any date on the calendar to track symptoms.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── INSIGHTS TAB ── */}
           {activeTab === "insights" && (
-            <div className="insights">
-              <div className="section-title" style={{ marginTop: 8 }}>Your cycle insights</div>
+            <div className="tab-content">
+              <div className="section-title">Your cycle insights</div>
               {prediction ? (
                 <>
                   <div className="insight-card">
-                    <div className="insight-icon">🌙</div>
+                    <div className="insight-icon">🌸</div>
                     <div>
                       <div className="insight-title">Next period</div>
                       <div className="insight-sub">Expected around {prediction.date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
@@ -323,40 +488,111 @@ export default function App() {
                       <div className="insight-sub">{periodDates.size} days logged across all cycles</div>
                     </div>
                   </div>
+                  {symptomStats.length > 0 && (
+                    <div className="insight-card">
+                      <div className="insight-icon">💊</div>
+                      <div>
+                        <div className="insight-title">Most common symptom</div>
+                        <div className="insight-sub">{symptomStats[0][0]} — reported {symptomStats[0][1]} {symptomStats[0][1] === 1 ? "time" : "times"}</div>
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
-                <div className="insight-card">
-                  <div className="insight-icon">✨</div>
-                  <div>
-                    <div className="insight-title">Log more cycles</div>
-                    <div className="insight-sub">Add at least 2 periods to unlock predictions, fertile window, and personal insights.</div>
-                  </div>
+                <div className="empty-state">
+                  <div className="empty-icon">🌸</div>
+                  Log at least 2 periods to unlock predictions, fertile window, and personal insights.
                 </div>
               )}
             </div>
           )}
         </div>
 
+        {/* Tab bar */}
         <div className="tab-bar">
           <button className={`tab ${activeTab === "calendar" ? "active" : ""}`} onClick={() => setActiveTab("calendar")}>
             <span className="tab-icon">🗓</span>Calendar
           </button>
+          <button className={`tab ${activeTab === "symptoms" ? "active" : ""}`} onClick={() => setActiveTab("symptoms")}>
+            <span className="tab-icon">🌡</span>Symptoms
+          </button>
           <button className={`tab ${activeTab === "insights" ? "active" : ""}`} onClick={() => setActiveTab("insights")}>
-            <span className="tab-icon">✨</span>Insights
+            <span className="tab-icon">🌸</span>Insights
           </button>
         </div>
 
+        {/* ── DAILY LOG MODAL ── */}
         {showModal && (
           <div className="overlay" onClick={() => setShowModal(false)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
               <div className="modal-handle" />
               <div className="modal-date">{selectedDate}</div>
+
               {periodDates.has(selectedDate) && (
                 <button className="btn-danger" onClick={() => removePeriod(selectedDate)}>Remove period mark</button>
               )}
-              <textarea className="modal-textarea" rows={4} placeholder="How are you feeling? Any symptoms or notes…" value={noteText} onChange={e => setNoteText(e.target.value)} />
+
+              {/* Mood */}
+              <div className="modal-section-label">How are you feeling?</div>
+              <div className="mood-picker">
+                {MOODS.map(m => (
+                  <button
+                    key={m.label}
+                    className={`mood-btn ${selectedMood === m.label ? "selected" : ""}`}
+                    onClick={() => setSelectedMood(selectedMood === m.label ? null : m.label)}
+                  >
+                    <span className="mood-emoji">{m.emoji}</span>
+                    <span className="mood-label">{m.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Flow */}
+              {periodDates.has(selectedDate) && (
+                <>
+                  <div className="modal-section-label">Flow intensity</div>
+                  <div className="flow-picker">
+                    {FLOW_LEVELS.map(f => (
+                      <button
+                        key={f}
+                        className={`flow-btn ${selectedFlow === f ? "selected" : ""}`}
+                        onClick={() => setSelectedFlow(selectedFlow === f ? null : f)}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Symptoms */}
+              <div className="modal-section-label">Symptoms</div>
+              <div className="symptom-picker">
+                {SYMPTOMS_LIST.map(s => (
+                  <button
+                    key={s}
+                    className={`symptom-btn ${selectedSymptoms.includes(s) ? "selected" : ""}`}
+                    onClick={() => toggleSymptom(s)}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+
+              <hr className="divider" />
+
+              {/* Note */}
+              <div className="modal-section-label">Notes</div>
+              <textarea
+                className="modal-textarea"
+                rows={3}
+                placeholder="Anything else to note…"
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+              />
+
               <div className="modal-actions">
-                <button className="btn-primary" onClick={saveNote}>Save note</button>
+                <button className="btn-primary" onClick={saveLog}>Save</button>
                 <button className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
               </div>
             </div>

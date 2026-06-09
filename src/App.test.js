@@ -11,17 +11,29 @@ test("renders current year", () => {
   expect(screen.getByText(new RegExp(new Date().getFullYear().toString()))).toBeInTheDocument();
 });
 
-test("renders cycles logged", () => {
+test("renders cycles stat", () => {
   render(<App />);
   expect(screen.getAllByText(/Cycles/i)[0]).toBeInTheDocument();
 });
 
-test("renders avg cycle stat", () => {
+test("renders avg days stat", () => {
   render(<App />);
   expect(screen.getByText(/Avg days/i)).toBeInTheDocument();
 });
 
-test("renders period days stat", () => {
+test("renders all three tabs", () => {
   render(<App />);
-  expect(screen.getByText(/Logged/i)).toBeInTheDocument();
+  expect(screen.getByText(/Calendar/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/Symptoms/i)[0]).toBeInTheDocument();
+  expect(screen.getAllByText(/Insights/i)[0]).toBeInTheDocument();
+});
+
+test("renders log period button", () => {
+  render(<App />);
+  expect(screen.getByText(/Log period/i)).toBeInTheDocument();
+});
+
+test("renders welcome message", () => {
+  render(<App />);
+  expect(screen.getByText(/Welcome to Cyra/i)).toBeInTheDocument();
 });
