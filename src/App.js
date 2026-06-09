@@ -1,15 +1,13 @@
 import { useState, useEffect } from "react";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-const STORAGE_KEY = "period_tracker_data";
+const STORAGE_KEY = "cyra_data";
 
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : { periods: [], symptoms: [], notes: {} };
+    return raw ? JSON.parse(raw) : { periods: [], notes: {} };
   } catch {
-    return { periods: [], symptoms: [], notes: {} };
+    return { periods: [], notes: {} };
   }
 }
 
@@ -18,7 +16,6 @@ function saveData(data) {
 }
 
 function toDateStr(date) {
-  // Returns "YYYY-MM-DD" string from a Date object
   return date.toISOString().split("T")[0];
 }
 
@@ -27,35 +24,27 @@ function getDaysInMonth(year, month) {
 }
 
 function getFirstDayOfMonth(year, month) {
-  return new Date(year, month, 1).getDay(); // 0 = Sunday
+  return new Date(year, month, 1).getDay();
 }
 
-const MONTH_NAMES = [
-  "January","February","March","April","May","June",
-  "July","August","September","October","November","December"
-];
-
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-// ─── Main App ────────────────────────────────────────────────────────────────
+const MONTHS = ["January","February","March","April","May","June",
+  "July","August","September","October","November","December"];
+const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 
 export default function App() {
   const today = new Date();
   const [data, setData] = useState(loadData);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [markingMode, setMarkingMode] = useState(false); // true = user is selecting a range
+  const [markingMode, setMarkingMode] = useState(false);
   const [rangeStart, setRangeStart] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(null);
   const [noteText, setNoteText] = useState("");
+  const [activeTab, setActiveTab] = useState("calendar");
 
-  // Persist every time data changes
-  useEffect(() => {
-    saveData(data);
-  }, [data]);
+  useEffect(() => { saveData(data); }, [data]);
 
-  // ── Derived: which dates are period days ──────────────────────────────────
   const periodDates = new Set();
   data.periods.forEach(({ start, end }) => {
     const s = new Date(start);
@@ -65,25 +54,22 @@ export default function App() {
     }
   });
 
-  // ── Simple next-period prediction ─────────────────────────────────────────
-  function getNextPeriodDate() {
+  function getPrediction() {
     if (data.periods.length < 2) return null;
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
     const gaps = [];
     for (let i = 1; i < sorted.length; i++) {
-      const diff = (new Date(sorted[i].start) - new Date(sorted[i-1].start)) / (1000 * 60 * 60 * 24);
-      gaps.push(diff);
+      gaps.push((new Date(sorted[i].start) - new Date(sorted[i-1].start)) / 86400000);
     }
-    const avgCycle = Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length);
+    const avg = Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length);
     const last = new Date(sorted[sorted.length - 1].start);
     const next = new Date(last);
-    next.setDate(next.getDate() + avgCycle);
-    return { date: next, cycleLength: avgCycle };
+    next.setDate(next.getDate() + avg);
+    return { date: next, cycleLength: avg };
   }
 
-  const prediction = getNextPeriodDate();
+  const prediction = getPrediction();
 
-  // Predicted period days (5 days starting from prediction)
   const predictedDates = new Set();
   if (prediction) {
     for (let i = 0; i < 5; i++) {
@@ -93,7 +79,15 @@ export default function App() {
     }
   }
 
-  // ── Calendar navigation ───────────────────────────────────────────────────
+  const ovulationDates = new Set();
+  if (prediction) {
+    for (let i = -2; i <= 2; i++) {
+      const d = new Date(prediction.date);
+      d.setDate(d.getDate() - 14 + i);
+      ovulationDates.add(toDateStr(d));
+    }
+  }
+
   function prevMonth() {
     if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
     else setViewMonth(m => m - 1);
@@ -103,425 +97,272 @@ export default function App() {
     else setViewMonth(m => m + 1);
   }
 
-  // ── Date click logic ──────────────────────────────────────────────────────
   function handleDateClick(dateStr) {
     if (markingMode) {
-      if (!rangeStart) {
-        setRangeStart(dateStr);
-      } else {
-        // Save period range
-        const start = rangeStart < dateStr ? rangeStart : dateStr;
-        const end   = rangeStart < dateStr ? dateStr : rangeStart;
-        setData(prev => ({
-          ...prev,
-          periods: [...prev.periods, { start, end, id: Date.now() }]
-        }));
-        setRangeStart(null);
-        setMarkingMode(false);
-      }
+      if (!rangeStart) { setRangeStart(dateStr); return; }
+      const start = rangeStart < dateStr ? rangeStart : dateStr;
+      const end   = rangeStart < dateStr ? dateStr : rangeStart;
+      setData(prev => ({ ...prev, periods: [...prev.periods, { start, end, id: Date.now() }] }));
+      setRangeStart(null);
+      setMarkingMode(false);
       return;
     }
-    // Normal click: open note modal
     setSelectedDate(dateStr);
     setNoteText(data.notes[dateStr] || "");
     setShowModal(true);
   }
 
   function saveNote() {
+    setData(prev => ({ ...prev, notes: { ...prev.notes, [selectedDate]: noteText } }));
+    setShowModal(false);
+  }
+
+  function removePeriod(dateStr) {
     setData(prev => ({
       ...prev,
-      notes: { ...prev.notes, [selectedDate]: noteText }
+      periods: prev.periods.filter(p => {
+        const s = new Date(p.start), e = new Date(p.end || p.start), d = new Date(dateStr);
+        return !(d >= s && d <= e);
+      })
     }));
     setShowModal(false);
   }
 
-  function removePeriodDay(dateStr) {
-    // Remove this date from any period it belongs to
-    setData(prev => {
-      const updated = prev.periods.filter(p => {
-        const s = new Date(p.start);
-        const e = new Date(p.end || p.start);
-        const d = new Date(dateStr);
-        return !(d >= s && d <= e);
-      });
-      return { ...prev, periods: updated };
-    });
-    setShowModal(false);
-  }
-
-  // ── Build calendar grid ───────────────────────────────────────────────────
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const firstDay = getFirstDayOfMonth(viewYear, viewMonth);
   const todayStr = toDateStr(today);
-
-  // ─────────────────────────────────────────────────────────────────────────
+  const daysUntil = prediction ? Math.ceil((prediction.date - today) / 86400000) : null;
 
   return (
-    <div style={styles.app}>
-      {/* Header */}
-      <header style={styles.header}>
-        <div style={styles.headerInner}>
-          <span style={styles.logo}>🌸 Cyra </span>
-          <span style={styles.headerSub}>Period Tracker</span>
-        </div>
-      </header>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0f0a14; color: #f0eaf8; font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+        .app { max-width: 420px; margin: 0 auto; min-height: 100vh; background: #0f0a14; position: relative; overflow-x: hidden; }
+        .app::before { content: ''; position: fixed; top: -100px; left: 50%; transform: translateX(-50%); width: 500px; height: 400px; background: radial-gradient(ellipse, rgba(180,100,255,0.15) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+        .header { padding: 20px 20px 0; position: relative; z-index: 1; }
+        .header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .logo { font-family: 'DM Serif Display', serif; font-size: 26px; background: linear-gradient(135deg, #e879f9, #a855f7, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .log-btn { background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; border: none; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: opacity 0.2s; display: flex; align-items: center; gap: 6px; }
+        .log-btn:hover { opacity: 0.85; }
+        .log-btn.active { background: linear-gradient(135deg, #ec4899, #a855f7); }
+        .hero { background: linear-gradient(135deg, rgba(168,85,247,0.15), rgba(236,72,153,0.1)); border: 1px solid rgba(168,85,247,0.2); border-radius: 20px; padding: 20px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .hero::after { content: '🌙'; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); font-size: 48px; opacity: 0.15; }
+        .hero-label { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; color: #a855f7; margin-bottom: 6px; }
+        .hero-number { font-family: 'DM Serif Display', serif; font-size: 52px; line-height: 1; background: linear-gradient(135deg, #e879f9, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 4px; }
+        .hero-sub { font-size: 13px; color: rgba(240,234,248,0.5); }
+        .hero-empty { font-size: 14px; color: rgba(240,234,248,0.5); line-height: 1.6; }
+        .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .stat { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); border-radius: 14px; padding: 14px 10px; text-align: center; }
+        .stat-num { font-family: 'DM Serif Display', serif; font-size: 24px; color: #e879f9; line-height: 1; margin-bottom: 4px; }
+        .stat-label { font-size: 10px; color: rgba(240,234,248,0.4); text-transform: uppercase; letter-spacing: 0.05em; }
+        .cal-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 20px; padding: 16px; margin-bottom: 20px; }
+        .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .cal-nav-btn { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: rgba(240,234,248,0.7); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .cal-nav-btn:hover { background: rgba(168,85,247,0.2); border-color: rgba(168,85,247,0.4); }
+        .cal-month { font-size: 15px; font-weight: 500; color: #f0eaf8; }
+        .day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+        .day-name { text-align: center; font-size: 10px; font-weight: 600; color: rgba(240,234,248,0.3); padding: 4px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .day-cell { aspect-ratio: 1; border-radius: 10px; border: 1px solid transparent; background: transparent; color: rgba(240,234,248,0.7); font-size: 12px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; position: relative; min-height: 36px; }
+        .day-cell:hover { background: rgba(168,85,247,0.15); color: #f0eaf8; }
+        .day-cell.is-period { background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(168,85,247,0.2)); color: #f9a8d4; border-color: rgba(236,72,153,0.3); }
+        .day-cell.is-predicted { background: rgba(251,191,36,0.1); color: #fcd34d; border-color: rgba(251,191,36,0.2); border-style: dashed; }
+        .day-cell.is-ovulation { background: rgba(52,211,153,0.1); color: #6ee7b7; border-color: rgba(52,211,153,0.2); }
+        .day-cell.is-today { border-color: #a855f7 !important; color: #e879f9 !important; font-weight: 600; }
+        .day-cell.is-range-start { background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; border-color: transparent; }
+        .note-dot { position: absolute; bottom: 4px; right: 4px; width: 4px; height: 4px; border-radius: 50%; background: #a855f7; }
+        .legend { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); margin-top: 10px; }
+        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(240,234,248,0.4); }
+        .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+        .mode-banner { background: linear-gradient(135deg, rgba(168,85,247,0.2), rgba(236,72,153,0.15)); border: 1px solid rgba(168,85,247,0.3); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #d8b4fe; }
+        .cancel-btn { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px 10px; color: rgba(240,234,248,0.6); font-size: 12px; cursor: pointer; font-family: inherit; }
+        .tab-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 420px; background: rgba(15,10,20,0.95); backdrop-filter: blur(20px); border-top: 1px solid rgba(255,255,255,0.07); display: flex; z-index: 10; }
+        .tab { flex: 1; padding: 12px 0 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; cursor: pointer; font-family: inherit; color: rgba(240,234,248,0.35); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
+        .tab.active { color: #a855f7; }
+        .tab-icon { font-size: 20px; line-height: 1; }
+        .insights { padding: 0 0 100px; }
+        .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(240,234,248,0.35); margin-bottom: 12px; }
+        .insight-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; }
+        .insight-icon { font-size: 24px; flex-shrink: 0; width: 44px; height: 44px; background: rgba(168,85,247,0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+        .insight-title { font-size: 14px; font-weight: 500; color: #f0eaf8; margin-bottom: 3px; }
+        .insight-sub { font-size: 12px; color: rgba(240,234,248,0.45); line-height: 1.5; }
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
+        .modal { background: #1a1025; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px 24px 0 0; padding: 24px 20px 40px; width: 100%; max-width: 420px; }
+        .modal-handle { width: 36px; height: 4px; background: rgba(255,255,255,0.15); border-radius: 2px; margin: 0 auto 20px; }
+        .modal-date { font-family: 'DM Serif Display', serif; font-size: 20px; color: #e879f9; margin-bottom: 16px; }
+        .modal-textarea { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 12px 14px; color: #f0eaf8; font-family: inherit; font-size: 14px; resize: none; outline: none; line-height: 1.6; margin-bottom: 12px; }
+        .modal-textarea:focus { border-color: rgba(168,85,247,0.5); }
+        .modal-textarea::placeholder { color: rgba(240,234,248,0.25); }
+        .modal-actions { display: flex; gap: 10px; }
+        .btn-primary { flex: 1; background: linear-gradient(135deg, #a855f7, #7c3aed); color: #fff; border: none; border-radius: 12px; padding: 12px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
+        .btn-secondary { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 16px; color: rgba(240,234,248,0.6); font-size: 14px; cursor: pointer; font-family: inherit; }
+        .btn-danger { width: 100%; background: rgba(236,72,153,0.1); border: 1px solid rgba(236,72,153,0.2); border-radius: 12px; padding: 11px; color: #f9a8d4; font-size: 13px; cursor: pointer; font-family: inherit; margin-bottom: 10px; }
+        .main-content { padding: 0 16px 100px; position: relative; z-index: 1; }
+      `}</style>
 
-      <main style={styles.main}>
-        {/* Prediction Banner */}
-        {prediction && (
-          <div style={styles.predBanner}>
-            <span style={styles.predIcon}>🔮</span>
-            <div>
-              <div style={styles.predTitle}>Next period predicted</div>
-              <div style={styles.predSub}>
-                Around <strong>{prediction.date.toDateString()}</strong> &nbsp;·&nbsp;
-                Average cycle: <strong>{prediction.cycleLength} days</strong>
+      <div className="app">
+        <div className="header">
+          <div className="header-top">
+            <span className="logo">Cyra</span>
+            <button className={`log-btn ${markingMode ? "active" : ""}`} onClick={() => { setMarkingMode(true); setRangeStart(null); }}>
+              <span>+</span>
+              {markingMode && !rangeStart ? "Pick start…" : "Log period"}
+            </button>
+          </div>
+        </div>
+
+        <div className="main-content">
+          {markingMode && (
+            <div className="mode-banner">
+              <span>{!rangeStart ? "Tap the day your period started" : "Now tap the day it ended"}</span>
+              <button className="cancel-btn" onClick={() => { setMarkingMode(false); setRangeStart(null); }}>Cancel</button>
+            </div>
+          )}
+
+          {activeTab === "calendar" && (
+            <>
+              <div className="hero">
+                {prediction && daysUntil !== null ? (
+                  <>
+                    <div className="hero-label">Next period in</div>
+                    <div className="hero-number">{daysUntil > 0 ? daysUntil : "Today"}</div>
+                    <div className="hero-sub">{daysUntil > 0 ? `days · ${prediction.date.toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : "Your period may start today"}</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="hero-label">Welcome to Cyra</div>
+                    <div className="hero-empty">Log two or more cycles to see your predictions and insights.</div>
+                  </>
+                )}
+              </div>
+
+              <div className="stats">
+                <div className="stat">
+                  <div className="stat-num">{data.periods.length}</div>
+                  <div className="stat-label">Cycles</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-num">{prediction ? prediction.cycleLength : "—"}</div>
+                  <div className="stat-label">Avg days</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-num">{periodDates.size}</div>
+                  <div className="stat-label">Logged</div>
+                </div>
+              </div>
+
+              <div className="cal-card">
+                <div className="cal-nav">
+                  <button className="cal-nav-btn" onClick={prevMonth}>‹</button>
+                  <span className="cal-month">{MONTHS[viewMonth]} {viewYear}</span>
+                  <button className="cal-nav-btn" onClick={nextMonth}>›</button>
+                </div>
+                <div className="day-grid">
+                  {DAYS.map(d => <div key={d} className="day-name">{d}</div>)}
+                </div>
+                <div className="day-grid">
+                  {Array.from({ length: firstDay }).map((_, i) => <div key={`e${i}`} />)}
+                  {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
+                    const ds = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+                    let cls = "day-cell";
+                    if (periodDates.has(ds)) cls += " is-period";
+                    else if (predictedDates.has(ds)) cls += " is-predicted";
+                    else if (ovulationDates.has(ds)) cls += " is-ovulation";
+                    if (ds === todayStr) cls += " is-today";
+                    if (rangeStart === ds) cls += " is-range-start";
+                    return (
+                      <button key={ds} className={cls} onClick={() => handleDateClick(ds)}>
+                        {day}
+                        {data.notes[ds] && <span className="note-dot" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="legend">
+                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(236,72,153,0.5)" }} />Period</div>
+                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(251,191,36,0.3)", border: "1px dashed rgba(251,191,36,0.5)" }} />Predicted</div>
+                  <div className="legend-item"><div className="legend-dot" style={{ background: "rgba(52,211,153,0.3)" }} />Fertile</div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "insights" && (
+            <div className="insights">
+              <div className="section-title" style={{ marginTop: 8 }}>Your cycle insights</div>
+              {prediction ? (
+                <>
+                  <div className="insight-card">
+                    <div className="insight-icon">🌙</div>
+                    <div>
+                      <div className="insight-title">Next period</div>
+                      <div className="insight-sub">Expected around {prediction.date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+                    </div>
+                  </div>
+                  <div className="insight-card">
+                    <div className="insight-icon">🌿</div>
+                    <div>
+                      <div className="insight-title">Fertile window</div>
+                      <div className="insight-sub">
+                        Around {(() => { const d = new Date(prediction.date); d.setDate(d.getDate() - 16); return d.toLocaleDateString("en-US", { month: "long", day: "numeric" }); })()} — {(() => { const d = new Date(prediction.date); d.setDate(d.getDate() - 12); return d.toLocaleDateString("en-US", { month: "long", day: "numeric" }); })()}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="insight-card">
+                    <div className="insight-icon">📊</div>
+                    <div>
+                      <div className="insight-title">Average cycle length</div>
+                      <div className="insight-sub">{prediction.cycleLength} days based on {data.periods.length} logged cycles</div>
+                    </div>
+                  </div>
+                  <div className="insight-card">
+                    <div className="insight-icon">💧</div>
+                    <div>
+                      <div className="insight-title">Total period days</div>
+                      <div className="insight-sub">{periodDates.size} days logged across all cycles</div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="insight-card">
+                  <div className="insight-icon">✨</div>
+                  <div>
+                    <div className="insight-title">Log more cycles</div>
+                    <div className="insight-sub">Add at least 2 periods to unlock predictions, fertile window, and personal insights.</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="tab-bar">
+          <button className={`tab ${activeTab === "calendar" ? "active" : ""}`} onClick={() => setActiveTab("calendar")}>
+            <span className="tab-icon">🗓</span>Calendar
+          </button>
+          <button className={`tab ${activeTab === "insights" ? "active" : ""}`} onClick={() => setActiveTab("insights")}>
+            <span className="tab-icon">✨</span>Insights
+          </button>
+        </div>
+
+        {showModal && (
+          <div className="overlay" onClick={() => setShowModal(false)}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-handle" />
+              <div className="modal-date">{selectedDate}</div>
+              {periodDates.has(selectedDate) && (
+                <button className="btn-danger" onClick={() => removePeriod(selectedDate)}>Remove period mark</button>
+              )}
+              <textarea className="modal-textarea" rows={4} placeholder="How are you feeling? Any symptoms or notes…" value={noteText} onChange={e => setNoteText(e.target.value)} />
+              <div className="modal-actions">
+                <button className="btn-primary" onClick={saveNote}>Save note</button>
+                <button className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
               </div>
             </div>
           </div>
         )}
-
-        {/* Calendar Card */}
-        <div style={styles.card}>
-          {/* Month navigation */}
-          <div style={styles.calNav}>
-            <button style={styles.navBtn} onClick={prevMonth}>‹</button>
-            <span style={styles.monthTitle}>
-              {MONTH_NAMES[viewMonth]} {viewYear}
-            </span>
-            <button style={styles.navBtn} onClick={nextMonth}>›</button>
-          </div>
-
-          {/* Day name headers */}
-          <div style={styles.dayGrid}>
-            {DAY_NAMES.map(d => (
-              <div key={d} style={styles.dayName}>{d}</div>
-            ))}
-          </div>
-
-          {/* Date grid */}
-          <div style={styles.dayGrid}>
-            {/* Empty cells before month starts */}
-            {Array.from({ length: firstDay }).map((_, i) => (
-              <div key={`empty-${i}`} />
-            ))}
-
-            {/* Actual days */}
-            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
-              const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-              const isPeriod = periodDates.has(dateStr);
-              const isPredicted = predictedDates.has(dateStr);
-              const isToday = dateStr === todayStr;
-              const isSelected = rangeStart === dateStr;
-              const hasNote = !!data.notes[dateStr];
-
-              let cellBg = "transparent";
-              let cellColor = "var(--text)";
-              let cellBorder = "1px solid transparent";
-
-              if (isPeriod) { cellBg = "#F4C0D1"; cellColor = "#72243E"; }
-              else if (isPredicted) { cellBg = "#FAC775"; cellColor = "#633806"; }
-              if (isToday) cellBorder = "2px solid #D4537E";
-              if (isSelected) { cellBg = "#D4537E"; cellColor = "#fff"; }
-
-              return (
-                <button
-                  key={dateStr}
-                  onClick={() => handleDateClick(dateStr)}
-                  style={{
-                    ...styles.dayCell,
-                    background: cellBg,
-                    color: cellColor,
-                    border: cellBorder,
-                    fontWeight: isToday ? "600" : "400",
-                    position: "relative",
-                  }}
-                  title={dateStr}
-                >
-                  {day}
-                  {hasNote && (
-                    <span style={styles.noteDot} title="Has note" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Legend */}
-          <div style={styles.legend}>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendDot, background: "#F4C0D1", border: "1px solid #D4537E" }} />
-              Period
-            </span>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendDot, background: "#FAC775" }} />
-              Predicted
-            </span>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendDot, border: "2px solid #D4537E" }} />
-              Today
-            </span>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div style={styles.actions}>
-          <button
-            style={{ ...styles.actionBtn, background: markingMode && !rangeStart ? "#D4537E" : "#F4C0D1", color: markingMode && !rangeStart ? "#fff" : "#72243E" }}
-            onClick={() => { setMarkingMode(true); setRangeStart(null); }}
-          >
-            {markingMode && !rangeStart ? "📍 Click start date…" : "➕ Log Period"}
-          </button>
-          {markingMode && rangeStart && (
-            <button
-              style={{ ...styles.actionBtn, background: "#D4537E", color: "#fff" }}
-            >
-              📍 Now click end date…
-            </button>
-          )}
-          {markingMode && (
-            <button
-              style={{ ...styles.actionBtn, background: "#F1EFE8", color: "#444441" }}
-              onClick={() => { setMarkingMode(false); setRangeStart(null); }}
-            >
-              ✕ Cancel
-            </button>
-          )}
-        </div>
-
-        {/* Stats row */}
-        <div style={styles.statsRow}>
-          <div style={styles.statCard}>
-            <div style={styles.statNum}>{data.periods.length}</div>
-            <div style={styles.statLabel}>Cycles logged</div>
-          </div>
-          <div style={styles.statCard}>
-            <div style={styles.statNum}>
-              {prediction ? `${prediction.cycleLength}d` : "—"}
-            </div>
-            <div style={styles.statLabel}>Avg cycle</div>
-          </div>
-          <div style={styles.statCard}>
-            <div style={styles.statNum}>{periodDates.size}</div>
-            <div style={styles.statLabel}>Period days</div>
-          </div>
-        </div>
-
-        {/* Instructions for Day 1 */}
-        <div style={styles.helpBox}>
-          <strong>How to use:</strong>
-          <ol style={{ margin: "8px 0 0 16px", lineHeight: "1.8" }}>
-            <li>Click <em>Log Period</em> → click the <strong>start date</strong> on the calendar</li>
-            <li>Then click the <strong>end date</strong> — dates turn pink 🌸</li>
-            <li>Click any date to add a personal note</li>
-            <li>Add 2+ cycles to see predictions (shown in orange)</li>
-          </ol>
-        </div>
-      </main>
-
-      {/* Note Modal */}
-      {showModal && (
-        <div style={styles.overlay} onClick={() => setShowModal(false)}>
-          <div style={styles.modal} onClick={e => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>📝 {selectedDate}</h3>
-
-            {periodDates.has(selectedDate) && (
-              <button
-                style={{ ...styles.actionBtn, background: "#FAECE7", color: "#712B13", marginBottom: 12 }}
-                onClick={() => removePeriodDay(selectedDate)}
-              >
-                🗑 Remove period mark
-              </button>
-            )}
-
-            <textarea
-              style={styles.textarea}
-              rows={4}
-              placeholder="How are you feeling today? Any symptoms, mood, or notes…"
-              value={noteText}
-              onChange={e => setNoteText(e.target.value)}
-            />
-
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button style={{ ...styles.actionBtn, flex: 1, background: "#D4537E", color: "#fff" }} onClick={saveNote}>
-                Save note
-              </button>
-              <button style={{ ...styles.actionBtn, flex: 1 }} onClick={() => setShowModal(false)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const styles = {
-  app: {
-    fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-    minHeight: "100vh",
-    background: "#FFF5F8",
-    color: "#2C2C2A",
-  },
-  header: {
-    background: "#fff",
-    borderBottom: "0.5px solid #F4C0D1",
-    padding: "14px 20px",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
-  },
-  headerInner: { display: "flex", alignItems: "center", gap: 10 },
-  logo: { fontSize: 22, fontWeight: 600 },
-  headerSub: { fontSize: 13, color: "#888780" },
-  main: { maxWidth: 480, margin: "0 auto", padding: "20px 16px 40px" },
-  predBanner: {
-    background: "#fff",
-    border: "1px solid #FAC775",
-    borderRadius: 12,
-    padding: "12px 16px",
-    display: "flex",
-    gap: 12,
-    alignItems: "flex-start",
-    marginBottom: 16,
-  },
-  predIcon: { fontSize: 22 },
-  predTitle: { fontWeight: 600, fontSize: 14, marginBottom: 2 },
-  predSub: { fontSize: 13, color: "#5F5E5A" },
-  card: {
-    background: "#fff",
-    borderRadius: 16,
-    border: "0.5px solid #F4C0D1",
-    padding: "16px",
-    marginBottom: 16,
-  },
-  calNav: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  navBtn: {
-    background: "none",
-    border: "0.5px solid #F4C0D1",
-    borderRadius: 8,
-    width: 32,
-    height: 32,
-    fontSize: 18,
-    cursor: "pointer",
-    color: "#D4537E",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  monthTitle: { fontWeight: 600, fontSize: 16 },
-  dayGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    gap: 3,
-    marginBottom: 4,
-  },
-  dayName: {
-    textAlign: "center",
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#888780",
-    padding: "4px 0",
-    textTransform: "uppercase",
-  },
-  dayCell: {
-    background: "transparent",
-    border: "1px solid transparent",
-    borderRadius: 8,
-    aspectRatio: "1",
-    cursor: "pointer",
-    fontSize: 13,
-    fontFamily: "inherit",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    transition: "all 0.15s",
-    minHeight: 36,
-  },
-  noteDot: {
-    position: "absolute",
-    bottom: 3,
-    right: 3,
-    width: 5,
-    height: 5,
-    borderRadius: "50%",
-    background: "#D4537E",
-  },
-  legend: {
-    display: "flex",
-    gap: 16,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTop: "0.5px solid #F4C0D1",
-    flexWrap: "wrap",
-  },
-  legendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5F5E5A" },
-  legendDot: { width: 14, height: 14, borderRadius: 4, display: "inline-block" },
-  actions: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
-  actionBtn: {
-    padding: "9px 16px",
-    borderRadius: 10,
-    border: "none",
-    background: "#F4C0D1",
-    color: "#72243E",
-    fontSize: 13,
-    fontWeight: 500,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  },
-  statsRow: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 },
-  statCard: {
-    background: "#fff",
-    border: "0.5px solid #F4C0D1",
-    borderRadius: 12,
-    padding: "12px 10px",
-    textAlign: "center",
-  },
-  statNum: { fontSize: 22, fontWeight: 600, color: "#D4537E" },
-  statLabel: { fontSize: 11, color: "#888780", marginTop: 2 },
-  helpBox: {
-    background: "#FBEAF0",
-    border: "0.5px solid #F4C0D1",
-    borderRadius: 12,
-    padding: "14px 16px",
-    fontSize: 13,
-    lineHeight: 1.6,
-    color: "#4B1528",
-  },
-  overlay: {
-    position: "fixed", inset: 0,
-    background: "rgba(0,0,0,0.35)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    zIndex: 100,
-    padding: 16,
-  },
-  modal: {
-    background: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    width: "100%",
-    maxWidth: 360,
-    boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
-  },
-  modalTitle: { margin: "0 0 14px", fontSize: 16 },
-  textarea: {
-    width: "100%",
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #F4C0D1",
-    fontFamily: "inherit",
-    fontSize: 13,
-    resize: "vertical",
-    boxSizing: "border-box",
-    outline: "none",
-    background: "#FFF5F8",
-  },
-};
