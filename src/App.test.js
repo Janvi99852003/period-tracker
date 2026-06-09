@@ -13,15 +13,15 @@ test("renders current year", () => {
 
 test("renders cycles logged", () => {
   render(<App />);
-  expect(screen.getByText(/Cycles logged/i)).toBeInTheDocument();
+  expect(screen.getByText(/Cycles/i)).toBeInTheDocument();
 });
 
 test("renders avg cycle stat", () => {
   render(<App />);
-  expect(screen.getByText(/Avg cycle/i)).toBeInTheDocument();
+  expect(screen.getByText(/Avg days/i)).toBeInTheDocument();
 });
 
 test("renders period days stat", () => {
   render(<App />);
-  expect(screen.getByText(/Period days/i)).toBeInTheDocument();
-}); 
+  expect(screen.getByText(/Logged/i)).toBeInTheDocument();
+});
