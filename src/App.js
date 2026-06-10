@@ -49,13 +49,9 @@ const SYMPTOMS_LIST = [
 
 const FLOW_LEVELS = ["Light", "Medium", "Heavy"];
 
-// ── Health Score Algorithm ─────────────────────────────────────────────────
-// Scores 0-100 based on logging consistency, cycle regularity, and symptom load
 function calculateHealthScore(data, prediction) {
   let score = 0;
 
-  // 1. Logging consistency (up to 30 points)
-  // How many of the last 14 days have ANY log entry
   const today = new Date();
   let loggedDays = 0;
   for (let i = 0; i < 14; i++) {
@@ -68,7 +64,6 @@ function calculateHealthScore(data, prediction) {
   }
   score += Math.round((loggedDays / 14) * 30);
 
-  // 2. Cycle regularity (up to 25 points)
   if (data.periods.length >= 2) {
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
     const gaps = [];
@@ -77,14 +72,10 @@ function calculateHealthScore(data, prediction) {
     }
     const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length;
     const variance = gaps.reduce((sum, g) => sum + Math.abs(g - avg), 0) / gaps.length;
-    // Lower variance = more regular = higher score
-    // variance of 0 = 25pts, variance of 7+ = 0pts
     const regularityScore = Math.max(0, 25 - Math.round(variance * 3.5));
     score += regularityScore;
   }
 
-  // 3. Mood score (up to 25 points)
-  // Positive moods (Happy, Calm) boost score; negative ones reduce it slightly
   const recentMoods = [];
   for (let i = 0; i < 14; i++) {
     const d = new Date(today);
@@ -97,11 +88,9 @@ function calculateHealthScore(data, prediction) {
     const ratio = positive / recentMoods.length;
     score += Math.round(ratio * 25);
   } else {
-    score += 12; // neutral if no mood data
+    score += 12;
   }
 
-  // 4. Symptom load (up to 20 points)
-  // Fewer symptoms = higher score (encourages tracking without penalizing)
   const recentSymptomDays = [];
   for (let i = 0; i < 14; i++) {
     const d = new Date(today);
@@ -110,16 +99,15 @@ function calculateHealthScore(data, prediction) {
     recentSymptomDays.push(s.length);
   }
   const avgSymptoms = recentSymptomDays.reduce((a, b) => a + b, 0) / 14;
-  // 0 symptoms = 20pts, 5+ avg symptoms = 5pts
   score += Math.max(5, 20 - Math.round(avgSymptoms * 3));
 
   return Math.min(100, Math.max(0, score));
 }
 
 function getScoreColor(score) {
-  if (score >= 75) return "#34d399"; // green
-  if (score >= 50) return "#fbbf24"; // yellow
-  return "#f87171"; // red
+  if (score >= 75) return "#34d399";
+  if (score >= 50) return "#fbbf24";
+  return "#f87171";
 }
 
 function getScoreLabel(score) {
@@ -158,16 +146,14 @@ export default function App() {
   const [selectedSymptoms, setSelectedSymptoms] = useState([]);
   const [activeTab, setActiveTab] = useState("calendar");
 
-  // PIN state
   const [pinLocked, setPinLocked] = useState(() => !!localStorage.getItem(PIN_KEY));
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [showSetPin, setShowSetPin] = useState(false);
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
-  const [pinStep, setPinStep] = useState(1); // 1 = enter new, 2 = confirm
+  const [pinStep, setPinStep] = useState(1);
 
-  // Theme state
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem(THEME_KEY);
     return saved === null ? true : saved === "dark";
@@ -219,18 +205,14 @@ export default function App() {
     }
   }
 
-  // ── Health Score ───────────────────────────────────────────────────────────
   const healthScore = calculateHealthScore(data, prediction);
   const scoreColor = getScoreColor(healthScore);
   const scoreLabel = getScoreLabel(healthScore);
   const scoreTip = getScoreTip(healthScore, data);
 
-  // ── Smart Reminders ────────────────────────────────────────────────────────
   function getReminders() {
     const reminders = [];
-    const todayStr = toDateStr(today);
 
-    // Period due soon (within 3 days)
     if (prediction) {
       const daysUntil = Math.ceil((prediction.date - today) / 86400000);
       if (daysUntil >= 0 && daysUntil <= 3) {
@@ -240,7 +222,6 @@ export default function App() {
           color: "#fb7185",
         });
       }
-      // Fertile window reminder
       const fertileStart = new Date(prediction.date);
       fertileStart.setDate(fertileStart.getDate() - 16);
       const fertileEnd = new Date(prediction.date);
@@ -254,7 +235,6 @@ export default function App() {
       }
     }
 
-    // Haven't logged in 3 days
     let lastLogDaysAgo = null;
     for (let i = 0; i <= 10; i++) {
       const d = new Date(today);
@@ -402,7 +382,6 @@ export default function App() {
     setShowModal(false);
   }
 
-  // ── PIN handlers ───────────────────────────────────────────────────────────
   function handlePinInput(digit) {
     if (pinInput.length >= 4) return;
     const val = pinInput + digit;
@@ -444,6 +423,7 @@ export default function App() {
 
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const firstDay = getFirstDayOfMonth(viewYear, viewMonth);
+  // ── FIX: single todayStr declaration (was duplicated, causing no-unused-vars error) ──
   const todayStr = toDateStr(today);
   const daysUntil = prediction ? Math.ceil((prediction.date - today) / 86400000) : null;
   const symptomStats = getSymptomStats();
@@ -453,7 +433,6 @@ export default function App() {
   const periodDurationData = getPeriodDurationData();
   const flowData = getFlowData();
 
-  // ── Theme tokens ───────────────────────────────────────────────────────────
   const T = isDark ? {
     bg: "#1a0a10", surface: "rgba(236,72,153,0.05)", border: "rgba(236,72,153,0.12)",
     text: "#fdf0f5", textMuted: "rgba(253,240,245,0.45)", textFaint: "rgba(253,240,245,0.3)",
@@ -471,7 +450,6 @@ export default function App() {
   const circumference = 2 * Math.PI * 40;
   const strokeDashoffset = circumference - (healthScore / 100) * circumference;
 
-  // ── PIN lock screen ────────────────────────────────────────────────────────
   if (pinLocked) {
     return (
       <>
@@ -533,7 +511,6 @@ export default function App() {
         .hero-sub { font-size: 13px; color: ${T.textMuted}; }
         .hero-empty { font-size: 14px; color: ${T.textMuted}; line-height: 1.6; }
 
-        /* Health Score Card */
         .score-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 22px; padding: 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 20px; }
         .score-ring-wrap { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
         .score-number { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
@@ -602,7 +579,6 @@ export default function App() {
         .export-btn { width: 100%; background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 14px; padding: 14px; color: #fb7185; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px; transition: all 0.2s; }
         .export-btn:hover { background: rgba(236,72,153,0.15); }
 
-        /* Settings section */
         .settings-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 18px; padding: 16px; margin-bottom: 12px; }
         .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid ${T.border}; }
         .settings-row:last-child { border-bottom: none; padding-bottom: 0; }
@@ -618,7 +594,6 @@ export default function App() {
         input:checked + .toggle-slider { background: #ec4899; }
         input:checked + .toggle-slider::before { transform: translateX(20px); }
 
-        /* PIN setup modal */
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; }
         .pin-modal { background: ${T.modal}; border: 1px solid ${T.border}; border-radius: 26px; padding: 28px 24px; width: 100%; max-width: 340px; text-align: center; }
         .pin-modal-title { font-family: 'DM Serif Display', serif; font-size: 22px; color: ${T.text}; margin-bottom: 6px; }
@@ -662,11 +637,9 @@ export default function App() {
           <div className="header-top">
             <span className="logo">Cyra</span>
             <div className="header-actions">
-              {/* Theme toggle */}
               <button className="icon-btn" onClick={() => setIsDark(d => !d)} title="Toggle theme">
                 {isDark ? "☀️" : "🌙"}
               </button>
-              {/* Lock button */}
               <button className="icon-btn" onClick={() => {
                 if (localStorage.getItem(PIN_KEY)) setPinLocked(true);
                 else setShowSetPin(true);
@@ -689,7 +662,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Smart Reminders */}
           {reminders.map((r, i) => (
             <div key={i} className="reminder-banner" style={{ borderColor: `${r.color}33` }}>
               <span className="reminder-icon">{r.icon}</span>
@@ -697,7 +669,6 @@ export default function App() {
             </div>
           ))}
 
-          {/* ── CALENDAR TAB ── */}
           {activeTab === "calendar" && (
             <>
               <div className="hero">
@@ -715,7 +686,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Health Score Card */}
               <div className="score-card">
                 <div className="score-ring-wrap">
                   <svg width="96" height="96" viewBox="0 0 96 96">
@@ -795,7 +765,6 @@ export default function App() {
             </>
           )}
 
-          {/* ── SYMPTOMS TAB ── */}
           {activeTab === "symptoms" && (
             <div className="tab-content">
               <div className="section-title">Mood history</div>
@@ -838,7 +807,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ── CHARTS TAB ── */}
           {activeTab === "charts" && (
             <div className="tab-content">
               <button className="export-btn" onClick={exportCSV}>📤 Export my data as CSV</button>
@@ -904,7 +872,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ── INSIGHTS TAB ── */}
           {activeTab === "insights" && (
             <div className="tab-content">
               <div className="section-title">Your cycle insights</div>
@@ -966,7 +933,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ── SETTINGS TAB ── */}
           {activeTab === "settings" && (
             <div className="tab-content">
               <div className="section-title">Appearance</div>
@@ -1042,7 +1008,6 @@ export default function App() {
           )}
         </div>
 
-        {/* Tab bar - 5 tabs */}
         <div className="tab-bar">
           <button className={`tab ${activeTab === "calendar" ? "active" : ""}`} onClick={() => setActiveTab("calendar")}>
             <span className="tab-icon">🗓</span>Calendar
@@ -1061,7 +1026,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* DAILY LOG MODAL */}
         {showModal && (
           <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
@@ -1106,7 +1070,6 @@ export default function App() {
           </div>
         )}
 
-        {/* PIN SETUP MODAL */}
         {showSetPin && (
           <div className="overlay" onClick={() => { setShowSetPin(false); setNewPin(""); setConfirmPin(""); setPinStep(1); setPinError(""); }}>
             <div className="pin-modal" onClick={e => e.stopPropagation()}>
