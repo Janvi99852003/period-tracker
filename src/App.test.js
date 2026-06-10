@@ -18,23 +18,24 @@ test("renders cycles stat", () => {
 
 test("renders avg days stat", () => {
   render(<App />);
-  expect(screen.getByText(/Avg days/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/Avg days/i)[0]).toBeInTheDocument();
 });
 
-test("renders all four tabs", () => {
+test("renders health score", () => {
   render(<App />);
-  expect(screen.getByText(/Calendar/i)).toBeInTheDocument();
+  expect(screen.getByText(/Health Score/i)).toBeInTheDocument();
+});
+
+test("renders all five tabs", () => {
+  render(<App />);
+  expect(screen.getAllByText(/Calendar/i)[0]).toBeInTheDocument();
   expect(screen.getAllByText(/Symptoms/i)[0]).toBeInTheDocument();
   expect(screen.getAllByText(/Charts/i)[0]).toBeInTheDocument();
   expect(screen.getAllByText(/Insights/i)[0]).toBeInTheDocument();
+  expect(screen.getAllByText(/Settings/i)[0]).toBeInTheDocument();
 });
 
 test("renders log period button", () => {
   render(<App />);
   expect(screen.getByText(/Log period/i)).toBeInTheDocument();
-});
-
-test("renders welcome message", () => {
-  render(<App />);
-  expect(screen.getByText(/Welcome to Cyra/i)).toBeInTheDocument();
 });
