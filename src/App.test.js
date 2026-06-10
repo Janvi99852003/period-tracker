@@ -21,10 +21,11 @@ test("renders avg days stat", () => {
   expect(screen.getByText(/Avg days/i)).toBeInTheDocument();
 });
 
-test("renders all three tabs", () => {
+test("renders all four tabs", () => {
   render(<App />);
   expect(screen.getByText(/Calendar/i)).toBeInTheDocument();
   expect(screen.getAllByText(/Symptoms/i)[0]).toBeInTheDocument();
+  expect(screen.getAllByText(/Charts/i)[0]).toBeInTheDocument();
   expect(screen.getAllByText(/Insights/i)[0]).toBeInTheDocument();
 });
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 const STORAGE_KEY = "cyra_data";
 
@@ -63,7 +64,6 @@ export default function App() {
 
   useEffect(() => { saveData(data); }, [data]);
 
-  // ── Period dates set ──────────────────────────────────────────────────────
   const periodDates = new Set();
   data.periods.forEach(({ start, end }) => {
     const s = new Date(start);
@@ -73,7 +73,6 @@ export default function App() {
     }
   });
 
-  // ── Prediction ────────────────────────────────────────────────────────────
   function getPrediction() {
     if (data.periods.length < 2) return null;
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
@@ -108,7 +107,6 @@ export default function App() {
     }
   }
 
-  // ── Symptom stats ─────────────────────────────────────────────────────────
   function getSymptomStats() {
     const counts = {};
     Object.values(data.symptoms || {}).forEach(arr => {
@@ -125,7 +123,89 @@ export default function App() {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }
 
-  // ── Navigation ────────────────────────────────────────────────────────────
+  // ── Chart data ────────────────────────────────────────────────────────────
+
+  function getCycleLengthData() {
+    if (data.periods.length < 2) return [];
+    const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
+    const result = [];
+    for (let i = 1; i < sorted.length; i++) {
+      const gap = Math.round((new Date(sorted[i].start) - new Date(sorted[i-1].start)) / 86400000);
+      const d = new Date(sorted[i].start);
+      result.push({
+        name: `${MONTHS[d.getMonth()].slice(0,3)} ${d.getFullYear()}`,
+        days: gap,
+      });
+    }
+    return result;
+  }
+
+  function getPeriodDurationData() {
+    if (data.periods.length === 0) return [];
+    const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
+    return sorted.map((p, i) => {
+      const s = new Date(p.start);
+      const e = new Date(p.end || p.start);
+      const dur = Math.round((e - s) / 86400000) + 1;
+      return {
+        name: `${MONTHS[s.getMonth()].slice(0,3)}`,
+        days: dur,
+      };
+    });
+  }
+
+  function getFlowData() {
+    const counts = { Light: 0, Medium: 0, Heavy: 0 };
+    Object.values(data.flows || {}).forEach(f => {
+      if (counts[f] !== undefined) counts[f]++;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }
+
+  // ── CSV Export ────────────────────────────────────────────────────────────
+
+  function exportCSV() {
+    const rows = [["Date", "Type", "Flow", "Mood", "Symptoms", "Notes"]];
+
+    data.periods.forEach(p => {
+      const s = new Date(p.start);
+      const e = new Date(p.end || p.start);
+      for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+        const ds = toDateStr(new Date(d));
+        rows.push([
+          ds,
+          "Period",
+          data.flows?.[ds] || "",
+          data.moods?.[ds] || "",
+          (data.symptoms?.[ds] || []).join("; "),
+          data.notes?.[ds] || "",
+        ]);
+      }
+    });
+
+    Object.keys(data.moods || {}).forEach(ds => {
+      if (!periodDates.has(ds)) {
+        rows.push([
+          ds,
+          "Log",
+          "",
+          data.moods[ds] || "",
+          (data.symptoms?.[ds] || []).join("; "),
+          data.notes?.[ds] || "",
+        ]);
+      }
+    });
+
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cyra_data.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function prevMonth() {
     if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
     else setViewMonth(m => m - 1);
@@ -135,7 +215,6 @@ export default function App() {
     else setViewMonth(m => m + 1);
   }
 
-  // ── Date click ────────────────────────────────────────────────────────────
   function handleDateClick(dateStr) {
     if (markingMode) {
       if (!rangeStart) { setRangeStart(dateStr); return; }
@@ -189,6 +268,18 @@ export default function App() {
   const symptomStats = getSymptomStats();
   const moodStats = getMoodStats();
   const totalLogged = Object.keys(data.moods || {}).length + Object.keys(data.symptoms || {}).length;
+  const cycleLengthData = getCycleLengthData();
+  const periodDurationData = getPeriodDurationData();
+  const flowData = getFlowData();
+
+  const customTooltipStyle = {
+    background: "#2a0e1a",
+    border: "1px solid rgba(236,72,153,0.2)",
+    borderRadius: 10,
+    color: "#fdf0f5",
+    fontSize: 12,
+    padding: "6px 12px",
+  };
 
   return (
     <>
@@ -199,7 +290,6 @@ export default function App() {
         .app { max-width: 420px; margin: 0 auto; min-height: 100vh; background: #1a0a10; position: relative; overflow-x: hidden; }
         .app::before { content: ''; position: fixed; top: -80px; left: 50%; transform: translateX(-50%); width: 500px; height: 380px; background: radial-gradient(ellipse, rgba(236,72,153,0.18) 0%, transparent 70%); pointer-events: none; z-index: 0; }
 
-        /* Header */
         .header { padding: 20px 20px 0; position: relative; z-index: 1; }
         .header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
         .logo { font-family: 'DM Serif Display', serif; font-size: 28px; background: linear-gradient(135deg, #fb7185, #ec4899, #f43f5e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
@@ -207,7 +297,6 @@ export default function App() {
         .log-btn:hover { opacity: 0.85; }
         .log-btn.active { background: linear-gradient(135deg, #f43f5e, #ec4899); }
 
-        /* Hero */
         .hero { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(244,63,94,0.1)); border: 1px solid rgba(236,72,153,0.25); border-radius: 22px; padding: 22px; margin-bottom: 16px; position: relative; overflow: hidden; }
         .hero::after { content: '🌸'; position: absolute; right: 18px; top: 50%; transform: translateY(-50%); font-size: 52px; opacity: 0.18; }
         .hero-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: #fb7185; margin-bottom: 6px; }
@@ -215,13 +304,11 @@ export default function App() {
         .hero-sub { font-size: 13px; color: rgba(253,240,245,0.5); }
         .hero-empty { font-size: 14px; color: rgba(253,240,245,0.45); line-height: 1.6; }
 
-        /* Stats */
         .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px; }
         .stat { background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 16px; padding: 14px 10px; text-align: center; }
         .stat-num { font-family: 'DM Serif Display', serif; font-size: 26px; color: #fb7185; line-height: 1; margin-bottom: 4px; }
         .stat-label { font-size: 10px; color: rgba(253,240,245,0.4); text-transform: uppercase; letter-spacing: 0.06em; }
 
-        /* Calendar */
         .cal-card { background: rgba(236,72,153,0.05); border: 1px solid rgba(236,72,153,0.12); border-radius: 22px; padding: 18px; margin-bottom: 18px; }
         .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
         .cal-nav-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(236,72,153,0.2); background: rgba(236,72,153,0.08); color: #fb7185; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
@@ -242,17 +329,14 @@ export default function App() {
         .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(253,240,245,0.4); }
         .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
 
-        /* Mode banner */
         .mode-banner { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(244,63,94,0.12)); border: 1px solid rgba(236,72,153,0.3); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #fda4af; }
         .cancel-btn { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px 12px; color: rgba(253,240,245,0.55); font-size: 12px; cursor: pointer; font-family: inherit; }
 
-        /* Tab bar */
         .tab-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 420px; background: rgba(26,10,16,0.96); backdrop-filter: blur(20px); border-top: 1px solid rgba(236,72,153,0.12); display: flex; z-index: 10; }
-        .tab { flex: 1; padding: 12px 0 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; cursor: pointer; font-family: inherit; color: rgba(253,240,245,0.3); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
+        .tab { flex: 1; padding: 10px 0 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; cursor: pointer; font-family: inherit; color: rgba(253,240,245,0.3); font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
         .tab.active { color: #ec4899; }
-        .tab-icon { font-size: 20px; line-height: 1; }
+        .tab-icon { font-size: 18px; line-height: 1; }
 
-        /* Insights & Symptoms tabs */
         .tab-content { padding: 0 0 100px; }
         .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(253,240,245,0.3); margin-bottom: 12px; margin-top: 8px; }
         .insight-card { background: rgba(236,72,153,0.05); border: 1px solid rgba(236,72,153,0.1); border-radius: 18px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; }
@@ -260,7 +344,6 @@ export default function App() {
         .insight-title { font-size: 14px; font-weight: 500; color: #fdf0f5; margin-bottom: 3px; }
         .insight-sub { font-size: 12px; color: rgba(253,240,245,0.45); line-height: 1.5; }
 
-        /* Symptom bar */
         .symptom-row { margin-bottom: 10px; }
         .symptom-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .symptom-name { font-size: 13px; color: #fdf0f5; }
@@ -268,46 +351,42 @@ export default function App() {
         .symptom-bar-bg { background: rgba(236,72,153,0.1); border-radius: 4px; height: 6px; width: 100%; }
         .symptom-bar-fill { background: linear-gradient(90deg, #ec4899, #fb7185); border-radius: 4px; height: 6px; transition: width 0.5s ease; }
 
-        /* Mood row */
         .mood-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
         .mood-chip { background: rgba(236,72,153,0.07); border: 1px solid rgba(236,72,153,0.12); border-radius: 20px; padding: 6px 12px; font-size: 13px; color: rgba(253,240,245,0.7); display: flex; align-items: center; gap: 6px; }
 
-        /* Modal */
+        /* Chart card */
+        .chart-card { background: rgba(236,72,153,0.05); border: 1px solid rgba(236,72,153,0.12); border-radius: 18px; padding: 16px; margin-bottom: 16px; }
+        .chart-title { font-size: 13px; font-weight: 500; color: #fdf0f5; margin-bottom: 4px; }
+        .chart-sub { font-size: 11px; color: rgba(253,240,245,0.35); margin-bottom: 14px; }
+
+        /* Export button */
+        .export-btn { width: 100%; background: rgba(236,72,153,0.08); border: 1px solid rgba(236,72,153,0.2); border-radius: 14px; padding: 14px; color: #fb7185; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px; transition: all 0.2s; }
+        .export-btn:hover { background: rgba(236,72,153,0.15); }
+
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px); display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
         .modal { background: #2a0e1a; border: 1px solid rgba(236,72,153,0.15); border-radius: 26px 26px 0 0; padding: 20px 20px 44px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; }
         .modal-handle { width: 36px; height: 4px; background: rgba(236,72,153,0.25); border-radius: 2px; margin: 0 auto 16px; }
         .modal-date { font-family: 'DM Serif Display', serif; font-size: 20px; color: #fb7185; margin-bottom: 16px; }
-
-        /* Mood picker */
         .modal-section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(253,240,245,0.35); margin-bottom: 8px; }
         .mood-picker { display: flex; gap: 8px; margin-bottom: 16px; }
         .mood-btn { flex: 1; background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 12px; padding: 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
         .mood-btn.selected { background: rgba(236,72,153,0.2); border-color: #ec4899; }
         .mood-emoji { font-size: 20px; }
         .mood-label { font-size: 9px; color: rgba(253,240,245,0.45); text-transform: uppercase; letter-spacing: 0.05em; }
-
-        /* Flow picker */
         .flow-picker { display: flex; gap: 8px; margin-bottom: 16px; }
         .flow-btn { flex: 1; background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 12px; padding: 9px 4px; font-size: 13px; color: rgba(253,240,245,0.6); cursor: pointer; font-family: inherit; transition: all 0.15s; text-align: center; }
         .flow-btn.selected { background: rgba(236,72,153,0.2); border-color: #ec4899; color: #fda4af; font-weight: 500; }
-
-        /* Symptom picker */
         .symptom-picker { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
         .symptom-btn { background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.12); border-radius: 20px; padding: 6px 12px; font-size: 12px; color: rgba(253,240,245,0.6); cursor: pointer; font-family: inherit; transition: all 0.15s; }
         .symptom-btn.selected { background: rgba(236,72,153,0.22); border-color: #ec4899; color: #fda4af; }
-
-        /* Note textarea */
         .modal-textarea { width: 100%; background: rgba(236,72,153,0.06); border: 1px solid rgba(236,72,153,0.15); border-radius: 14px; padding: 12px 14px; color: #fdf0f5; font-family: inherit; font-size: 14px; resize: none; outline: none; line-height: 1.6; margin-bottom: 12px; }
         .modal-textarea:focus { border-color: rgba(236,72,153,0.45); }
         .modal-textarea::placeholder { color: rgba(253,240,245,0.22); }
-
-        /* Buttons */
         .modal-actions { display: flex; gap: 10px; }
         .btn-primary { flex: 1; background: linear-gradient(135deg, #ec4899, #be185d); color: #fff; border: none; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
         .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 14px; padding: 13px 18px; color: rgba(253,240,245,0.5); font-size: 14px; cursor: pointer; font-family: inherit; }
         .btn-danger { width: 100%; background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.2); border-radius: 12px; padding: 11px; color: #fda4af; font-size: 13px; cursor: pointer; font-family: inherit; margin-bottom: 12px; }
         .divider { border: none; border-top: 1px solid rgba(236,72,153,0.1); margin: 12px 0; }
-
         .main-content { padding: 0 16px 100px; position: relative; z-index: 1; }
         .empty-state { text-align: center; padding: 40px 20px; color: rgba(253,240,245,0.35); font-size: 14px; line-height: 1.8; }
         .empty-icon { font-size: 36px; margin-bottom: 12px; }
@@ -424,29 +503,100 @@ export default function App() {
                   No moods logged yet.<br />Tap any date on the calendar to log how you feel.
                 </div>
               )}
-
               <div className="section-title" style={{ marginTop: 20 }}>Most common symptoms</div>
               {symptomStats.length > 0 ? (
-                <>
-                  {symptomStats.map(([symptom, count]) => (
-                    <div key={symptom} className="symptom-row">
-                      <div className="symptom-row-top">
-                        <span className="symptom-name">{symptom}</span>
-                        <span className="symptom-count">{count} {count === 1 ? "time" : "times"}</span>
-                      </div>
-                      <div className="symptom-bar-bg">
-                        <div
-                          className="symptom-bar-fill"
-                          style={{ width: `${Math.min(100, (count / (symptomStats[0][1])) * 100)}%` }}
-                        />
-                      </div>
+                symptomStats.map(([symptom, count]) => (
+                  <div key={symptom} className="symptom-row">
+                    <div className="symptom-row-top">
+                      <span className="symptom-name">{symptom}</span>
+                      <span className="symptom-count">{count} {count === 1 ? "time" : "times"}</span>
                     </div>
-                  ))}
-                </>
+                    <div className="symptom-bar-bg">
+                      <div className="symptom-bar-fill" style={{ width: `${Math.min(100, (count / symptomStats[0][1]) * 100)}%` }} />
+                    </div>
+                  </div>
+                ))
               ) : (
                 <div className="empty-state">
                   <div className="empty-icon">💊</div>
                   No symptoms logged yet.<br />Tap any date on the calendar to track symptoms.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── CHARTS TAB ── */}
+          {activeTab === "charts" && (
+            <div className="tab-content">
+
+              <button className="export-btn" onClick={exportCSV}>
+                📤 Export my data as CSV
+              </button>
+
+              {cycleLengthData.length > 0 ? (
+                <div className="chart-card">
+                  <div className="chart-title">Cycle length over time</div>
+                  <div className="chart-sub">How many days between each period</div>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={cycleLengthData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(236,72,153,0.1)" />
+                      <XAxis dataKey="name" tick={{ fill: "rgba(253,240,245,0.4)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "rgba(253,240,245,0.4)", fontSize: 10 }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
+                      <Tooltip contentStyle={customTooltipStyle} formatter={(v) => [`${v} days`, "Cycle length"]} />
+                      <Line type="monotone" dataKey="days" stroke="#ec4899" strokeWidth={2.5} dot={{ fill: "#ec4899", r: 4 }} activeDot={{ r: 6 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="chart-card">
+                  <div className="chart-title">Cycle length over time</div>
+                  <div className="empty-state" style={{ padding: "20px 0" }}>
+                    <div className="empty-icon">📊</div>
+                    Log at least 2 periods to see your cycle chart.
+                  </div>
+                </div>
+              )}
+
+              {periodDurationData.length > 0 && (
+                <div className="chart-card">
+                  <div className="chart-title">Period duration</div>
+                  <div className="chart-sub">How many days each period lasted</div>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <BarChart data={periodDurationData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(236,72,153,0.1)" />
+                      <XAxis dataKey="name" tick={{ fill: "rgba(253,240,245,0.4)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "rgba(253,240,245,0.4)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={customTooltipStyle} formatter={(v) => [`${v} days`, "Duration"]} />
+                      <Bar dataKey="days" fill="#ec4899" radius={[6, 6, 0, 0]} opacity={0.85} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {flowData.some(f => f.value > 0) && (
+                <div className="chart-card">
+                  <div className="chart-title">Flow intensity</div>
+                  <div className="chart-sub">Distribution of your logged flow levels</div>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <BarChart data={flowData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(236,72,153,0.1)" />
+                      <XAxis dataKey="name" tick={{ fill: "rgba(253,240,245,0.4)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "rgba(253,240,245,0.4)", fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip contentStyle={customTooltipStyle} formatter={(v) => [`${v} days`, "Days logged"]} />
+                      <Bar dataKey="value" radius={[6, 6, 0, 0]} opacity={0.85}>
+                        {flowData.map((entry, index) => (
+                          <rect key={index} fill={index === 0 ? "#fda4af" : index === 1 ? "#ec4899" : "#be185d"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {cycleLengthData.length === 0 && periodDurationData.length === 0 && (
+                <div className="empty-state">
+                  <div className="empty-icon">📈</div>
+                  Start logging periods and symptoms to see your health charts here.
                 </div>
               )}
             </div>
@@ -508,7 +658,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Tab bar */}
+        {/* Tab bar - now 4 tabs */}
         <div className="tab-bar">
           <button className={`tab ${activeTab === "calendar" ? "active" : ""}`} onClick={() => setActiveTab("calendar")}>
             <span className="tab-icon">🗓</span>Calendar
@@ -516,81 +666,51 @@ export default function App() {
           <button className={`tab ${activeTab === "symptoms" ? "active" : ""}`} onClick={() => setActiveTab("symptoms")}>
             <span className="tab-icon">🌡</span>Symptoms
           </button>
+          <button className={`tab ${activeTab === "charts" ? "active" : ""}`} onClick={() => setActiveTab("charts")}>
+            <span className="tab-icon">📊</span>Charts
+          </button>
           <button className={`tab ${activeTab === "insights" ? "active" : ""}`} onClick={() => setActiveTab("insights")}>
             <span className="tab-icon">🌸</span>Insights
           </button>
         </div>
 
-        {/* ── DAILY LOG MODAL ── */}
+        {/* DAILY LOG MODAL */}
         {showModal && (
           <div className="overlay" onClick={() => setShowModal(false)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
               <div className="modal-handle" />
               <div className="modal-date">{selectedDate}</div>
-
               {periodDates.has(selectedDate) && (
                 <button className="btn-danger" onClick={() => removePeriod(selectedDate)}>Remove period mark</button>
               )}
-
-              {/* Mood */}
               <div className="modal-section-label">How are you feeling?</div>
               <div className="mood-picker">
                 {MOODS.map(m => (
-                  <button
-                    key={m.label}
-                    className={`mood-btn ${selectedMood === m.label ? "selected" : ""}`}
-                    onClick={() => setSelectedMood(selectedMood === m.label ? null : m.label)}
-                  >
+                  <button key={m.label} className={`mood-btn ${selectedMood === m.label ? "selected" : ""}`} onClick={() => setSelectedMood(selectedMood === m.label ? null : m.label)}>
                     <span className="mood-emoji">{m.emoji}</span>
                     <span className="mood-label">{m.label}</span>
                   </button>
                 ))}
               </div>
-
-              {/* Flow */}
               {periodDates.has(selectedDate) && (
                 <>
                   <div className="modal-section-label">Flow intensity</div>
                   <div className="flow-picker">
                     {FLOW_LEVELS.map(f => (
-                      <button
-                        key={f}
-                        className={`flow-btn ${selectedFlow === f ? "selected" : ""}`}
-                        onClick={() => setSelectedFlow(selectedFlow === f ? null : f)}
-                      >
-                        {f}
-                      </button>
+                      <button key={f} className={`flow-btn ${selectedFlow === f ? "selected" : ""}`} onClick={() => setSelectedFlow(selectedFlow === f ? null : f)}>{f}</button>
                     ))}
                   </div>
                 </>
               )}
-
-              {/* Symptoms */}
               <div className="modal-section-label">Symptoms</div>
               <div className="symptom-picker">
                 {SYMPTOMS_LIST.map(s => (
-                  <button
-                    key={s}
-                    className={`symptom-btn ${selectedSymptoms.includes(s) ? "selected" : ""}`}
-                    onClick={() => toggleSymptom(s)}
-                  >
-                    {s}
-                  </button>
+                  <button key={s} className={`symptom-btn ${selectedSymptoms.includes(s) ? "selected" : ""}`} onClick={() => toggleSymptom(s)}>{s}</button>
                 ))}
               </div>
-
               <hr className="divider" />
-
-              {/* Note */}
               <div className="modal-section-label">Notes</div>
-              <textarea
-                className="modal-textarea"
-                rows={3}
-                placeholder="Anything else to note…"
-                value={noteText}
-                onChange={e => setNoteText(e.target.value)}
-              />
-
+              <textarea className="modal-textarea" rows={3} placeholder="Anything else to note…" value={noteText} onChange={e => setNoteText(e.target.value)} />
               <div className="modal-actions">
                 <button className="btn-primary" onClick={saveLog}>Save</button>
                 <button className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
