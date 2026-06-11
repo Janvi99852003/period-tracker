@@ -49,54 +49,44 @@ const SYMPTOMS_LIST = [
 
 const FLOW_LEVELS = ["Light", "Medium", "Heavy"];
 
-function calculateHealthScore(data, prediction) {
+// ── Health Score Algorithm ────────────────────────────────────────────────
+function calculateHealthScore(data) {
   let score = 0;
-
   const today = new Date();
+
   let loggedDays = 0;
   for (let i = 0; i < 14; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
+    const d = new Date(today); d.setDate(d.getDate() - i);
     const ds = toDateStr(d);
-    if (data.moods?.[ds] || (data.symptoms?.[ds] || []).length > 0 || data.notes?.[ds]) {
-      loggedDays++;
-    }
+    if (data.moods?.[ds] || (data.symptoms?.[ds] || []).length > 0 || data.notes?.[ds]) loggedDays++;
   }
   score += Math.round((loggedDays / 14) * 30);
 
   if (data.periods.length >= 2) {
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
     const gaps = [];
-    for (let i = 1; i < sorted.length; i++) {
+    for (let i = 1; i < sorted.length; i++)
       gaps.push((new Date(sorted[i].start) - new Date(sorted[i - 1].start)) / 86400000);
-    }
     const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length;
     const variance = gaps.reduce((sum, g) => sum + Math.abs(g - avg), 0) / gaps.length;
-    const regularityScore = Math.max(0, 25 - Math.round(variance * 3.5));
-    score += regularityScore;
+    score += Math.max(0, 25 - Math.round(variance * 3.5));
   }
 
   const recentMoods = [];
   for (let i = 0; i < 14; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
+    const d = new Date(today); d.setDate(d.getDate() - i);
     const mood = data.moods?.[toDateStr(d)];
     if (mood) recentMoods.push(mood);
   }
   if (recentMoods.length > 0) {
     const positive = recentMoods.filter(m => m === "Happy" || m === "Calm").length;
-    const ratio = positive / recentMoods.length;
-    score += Math.round(ratio * 25);
-  } else {
-    score += 12;
-  }
+    score += Math.round((positive / recentMoods.length) * 25);
+  } else { score += 12; }
 
   const recentSymptomDays = [];
   for (let i = 0; i < 14; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const s = data.symptoms?.[toDateStr(d)] || [];
-    recentSymptomDays.push(s.length);
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    recentSymptomDays.push((data.symptoms?.[toDateStr(d)] || []).length);
   }
   const avgSymptoms = recentSymptomDays.reduce((a, b) => a + b, 0) / 14;
   score += Math.max(5, 20 - Math.round(avgSymptoms * 3));
@@ -109,26 +99,149 @@ function getScoreColor(score) {
   if (score >= 50) return "#fbbf24";
   return "#f87171";
 }
-
 function getScoreLabel(score) {
   if (score >= 75) return "Great";
   if (score >= 50) return "Good";
   if (score >= 25) return "Fair";
   return "Low";
 }
-
 function getScoreTip(score, data) {
   if (score >= 75) return "You're tracking consistently. Keep it up!";
   const today = new Date();
-  const recentLogs = [];
+  let recentLogs = 0;
   for (let i = 0; i < 7; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    if (data.moods?.[toDateStr(d)]) recentLogs.push(true);
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    if (data.moods?.[toDateStr(d)]) recentLogs++;
   }
-  if (recentLogs.length < 3) return "Log your mood daily to improve your score.";
+  if (recentLogs < 3) return "Log your mood daily to improve your score.";
   if (data.periods.length < 2) return "Log more cycles to improve regularity tracking.";
   return "Consistent logging improves your health score over time.";
+}
+
+// ── Pattern Detection Engine ──────────────────────────────────────────────
+// Analyses logged data and returns human-readable insight cards
+function detectPatterns(data) {
+  const patterns = [];
+  if (data.periods.length < 2) return patterns;
+
+  const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
+
+  // 1. Cycle trend — is it getting shorter or longer?
+  if (sorted.length >= 3) {
+    const gaps = [];
+    for (let i = 1; i < sorted.length; i++)
+      gaps.push((new Date(sorted[i].start) - new Date(sorted[i - 1].start)) / 86400000);
+    const firstHalf = gaps.slice(0, Math.floor(gaps.length / 2));
+    const secondHalf = gaps.slice(Math.ceil(gaps.length / 2));
+    const avgFirst = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+    const diff = avgSecond - avgFirst;
+    if (Math.abs(diff) >= 2) {
+      patterns.push({
+        icon: diff < 0 ? "📉" : "📈",
+        title: `Your cycle is getting ${diff < 0 ? "shorter" : "longer"}`,
+        detail: `Average shifted by ${Math.abs(diff).toFixed(1)} days over your last ${sorted.length} cycles.`,
+        type: "trend",
+      });
+    }
+  }
+
+  // 2. Consistent symptom on specific cycle day
+  const symptomOnDay = {}; // symptom -> { dayN -> count }
+  sorted.forEach(period => {
+    const start = new Date(period.start);
+    const end = new Date(period.end || period.start);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const ds = toDateStr(new Date(d));
+      const dayN = Math.round((new Date(ds) - start) / 86400000) + 1;
+      const syms = data.symptoms?.[ds] || [];
+      syms.forEach(s => {
+        if (!symptomOnDay[s]) symptomOnDay[s] = {};
+        symptomOnDay[s][dayN] = (symptomOnDay[s][dayN] || 0) + 1;
+      });
+    }
+  });
+
+  Object.entries(symptomOnDay).forEach(([symptom, dayCounts]) => {
+    const topDay = Object.entries(dayCounts).sort((a, b) => b[1] - a[1])[0];
+    if (topDay && topDay[1] >= 2 && topDay[1] / sorted.length >= 0.5) {
+      patterns.push({
+        icon: "🔁",
+        title: `${symptom} often on Day ${topDay[0]}`,
+        detail: `You logged ${symptom} on Day ${topDay[0]} of your period in ${topDay[1]} out of ${sorted.length} cycles.`,
+        type: "symptom",
+      });
+    }
+  });
+
+  // 3. Mood before period — do you tend to feel a certain way in the 3 days before?
+  const prePeriodMoods = {};
+  sorted.forEach(period => {
+    const start = new Date(period.start);
+    for (let i = 1; i <= 3; i++) {
+      const d = new Date(start); d.setDate(d.getDate() - i);
+      const mood = data.moods?.[toDateStr(d)];
+      if (mood) prePeriodMoods[mood] = (prePeriodMoods[mood] || 0) + 1;
+    }
+  });
+  const topPreMood = Object.entries(prePeriodMoods).sort((a, b) => b[1] - a[1])[0];
+  if (topPreMood && topPreMood[1] >= 2) {
+    const moodObj = MOODS.find(m => m.label === topPreMood[0]);
+    patterns.push({
+      icon: moodObj?.emoji || "😶",
+      title: `You tend to feel ${topPreMood[0]} before your period`,
+      detail: `Logged ${topPreMood[0]} in the 3 days before your period ${topPreMood[1]} times.`,
+      type: "mood",
+    });
+  }
+
+  // 4. Period duration consistency
+  const durations = sorted.map(p => {
+    const s = new Date(p.start), e = new Date(p.end || p.start);
+    return Math.round((e - s) / 86400000) + 1;
+  });
+  if (durations.length >= 2) {
+    const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
+    const allClose = durations.every(d => Math.abs(d - avg) <= 1);
+    if (allClose && avg >= 3) {
+      patterns.push({
+        icon: "⏱️",
+        title: `Very consistent period duration`,
+        detail: `Your periods consistently last around ${Math.round(avg)} days. This is a healthy regularity sign.`,
+        type: "duration",
+      });
+    }
+  }
+
+  // 5. Heaviest flow day pattern
+  const flowByDay = {}; // dayN -> { Heavy: n, Medium: n, Light: n }
+  sorted.forEach(period => {
+    const start = new Date(period.start);
+    const end = new Date(period.end || period.start);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const ds = toDateStr(new Date(d));
+      const dayN = Math.round((new Date(ds) - start) / 86400000) + 1;
+      const flow = data.flows?.[ds];
+      if (flow) {
+        if (!flowByDay[dayN]) flowByDay[dayN] = { Heavy: 0, Medium: 0, Light: 0 };
+        flowByDay[dayN][flow]++;
+      }
+    }
+  });
+  let heaviestDay = null, heaviestCount = 0;
+  Object.entries(flowByDay).forEach(([day, counts]) => {
+    if (counts.Heavy > heaviestCount) { heaviestCount = counts.Heavy; heaviestDay = day; }
+  });
+  if (heaviestDay && heaviestCount >= 2) {
+    patterns.push({
+      icon: "💧",
+      title: `Day ${heaviestDay} is usually your heaviest`,
+      detail: `You logged Heavy flow on Day ${heaviestDay} in ${heaviestCount} cycles. Plan ahead on those days.`,
+      type: "flow",
+    });
+  }
+
+  return patterns;
 }
 
 export default function App() {
@@ -146,6 +259,14 @@ export default function App() {
   const [selectedSymptoms, setSelectedSymptoms] = useState([]);
   const [activeTab, setActiveTab] = useState("calendar");
 
+  // Splash screen
+  const [showSplash, setShowSplash] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setShowSplash(false), 1800);
+    return () => clearTimeout(t);
+  }, []);
+
+  // PIN state
   const [pinLocked, setPinLocked] = useState(() => !!localStorage.getItem(PIN_KEY));
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
@@ -154,6 +275,7 @@ export default function App() {
   const [confirmPin, setConfirmPin] = useState("");
   const [pinStep, setPinStep] = useState(1);
 
+  // Theme
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem(THEME_KEY);
     return saved === null ? true : saved === "dark";
@@ -164,24 +286,20 @@ export default function App() {
 
   const periodDates = new Set();
   data.periods.forEach(({ start, end }) => {
-    const s = new Date(start);
-    const e = new Date(end || start);
-    for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const s = new Date(start), e = new Date(end || start);
+    for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1))
       periodDates.add(toDateStr(new Date(d)));
-    }
   });
 
   function getPrediction() {
     if (data.periods.length < 2) return null;
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
     const gaps = [];
-    for (let i = 1; i < sorted.length; i++) {
+    for (let i = 1; i < sorted.length; i++)
       gaps.push((new Date(sorted[i].start) - new Date(sorted[i - 1].start)) / 86400000);
-    }
     const avg = Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length);
     const last = new Date(sorted[sorted.length - 1].start);
-    const next = new Date(last);
-    next.setDate(next.getDate() + avg);
+    const next = new Date(last); next.setDate(next.getDate() + avg);
     return { date: next, cycleLength: avg };
   }
 
@@ -190,8 +308,7 @@ export default function App() {
   const predictedDates = new Set();
   if (prediction) {
     for (let i = 0; i < 5; i++) {
-      const d = new Date(prediction.date);
-      d.setDate(d.getDate() + i);
+      const d = new Date(prediction.date); d.setDate(d.getDate() + i);
       predictedDates.add(toDateStr(d));
     }
   }
@@ -199,20 +316,19 @@ export default function App() {
   const ovulationDates = new Set();
   if (prediction) {
     for (let i = -2; i <= 2; i++) {
-      const d = new Date(prediction.date);
-      d.setDate(d.getDate() - 14 + i);
+      const d = new Date(prediction.date); d.setDate(d.getDate() - 14 + i);
       ovulationDates.add(toDateStr(d));
     }
   }
 
-  const healthScore = calculateHealthScore(data, prediction);
+  const healthScore = calculateHealthScore(data);
   const scoreColor = getScoreColor(healthScore);
   const scoreLabel = getScoreLabel(healthScore);
   const scoreTip = getScoreTip(healthScore, data);
+  const patterns = detectPatterns(data);
 
   function getReminders() {
     const reminders = [];
-
     if (prediction) {
       const daysUntil = Math.ceil((prediction.date - today) / 86400000);
       if (daysUntil >= 0 && daysUntil <= 3) {
@@ -222,37 +338,20 @@ export default function App() {
           color: "#fb7185",
         });
       }
-      const fertileStart = new Date(prediction.date);
-      fertileStart.setDate(fertileStart.getDate() - 16);
-      const fertileEnd = new Date(prediction.date);
-      fertileEnd.setDate(fertileEnd.getDate() - 12);
+      const fertileStart = new Date(prediction.date); fertileStart.setDate(fertileStart.getDate() - 16);
+      const fertileEnd = new Date(prediction.date); fertileEnd.setDate(fertileEnd.getDate() - 12);
       if (today >= fertileStart && today <= fertileEnd) {
-        reminders.push({
-          icon: "🌿",
-          text: "You're in your fertile window",
-          color: "#34d399",
-        });
+        reminders.push({ icon: "🌿", text: "You're in your fertile window", color: "#34d399" });
       }
     }
-
     let lastLogDaysAgo = null;
     for (let i = 0; i <= 10; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
+      const d = new Date(today); d.setDate(d.getDate() - i);
       const ds = toDateStr(d);
-      if (data.moods?.[ds] || (data.symptoms?.[ds] || []).length > 0) {
-        lastLogDaysAgo = i;
-        break;
-      }
+      if (data.moods?.[ds] || (data.symptoms?.[ds] || []).length > 0) { lastLogDaysAgo = i; break; }
     }
-    if (lastLogDaysAgo === null || lastLogDaysAgo >= 3) {
-      reminders.push({
-        icon: "📝",
-        text: "You haven't logged in 3+ days",
-        color: "#fbbf24",
-      });
-    }
-
+    if (lastLogDaysAgo === null || lastLogDaysAgo >= 3)
+      reminders.push({ icon: "📝", text: "You haven't logged in 3+ days", color: "#fbbf24" });
     return reminders;
   }
 
@@ -260,56 +359,43 @@ export default function App() {
 
   function getSymptomStats() {
     const counts = {};
-    Object.values(data.symptoms || {}).forEach(arr => {
-      arr.forEach(s => { counts[s] = (counts[s] || 0) + 1; });
-    });
+    Object.values(data.symptoms || {}).forEach(arr => arr.forEach(s => { counts[s] = (counts[s] || 0) + 1; }));
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }
 
   function getMoodStats() {
     const counts = {};
-    Object.values(data.moods || {}).forEach(m => {
-      counts[m] = (counts[m] || 0) + 1;
-    });
+    Object.values(data.moods || {}).forEach(m => { counts[m] = (counts[m] || 0) + 1; });
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }
 
   function getCycleLengthData() {
     if (data.periods.length < 2) return [];
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
-    const result = [];
-    for (let i = 1; i < sorted.length; i++) {
-      const gap = Math.round((new Date(sorted[i].start) - new Date(sorted[i - 1].start)) / 86400000);
-      const d = new Date(sorted[i].start);
-      result.push({ name: `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`, days: gap });
-    }
-    return result;
+    return sorted.slice(1).map((p, i) => {
+      const gap = Math.round((new Date(p.start) - new Date(sorted[i].start)) / 86400000);
+      const d = new Date(p.start);
+      return { name: `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`, days: gap };
+    });
   }
 
   function getPeriodDurationData() {
-    if (data.periods.length === 0) return [];
-    const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
-    return sorted.map(p => {
-      const s = new Date(p.start);
-      const e = new Date(p.end || p.start);
-      const dur = Math.round((e - s) / 86400000) + 1;
-      return { name: `${MONTHS[s.getMonth()].slice(0, 3)}`, days: dur };
+    return [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start)).map(p => {
+      const s = new Date(p.start), e = new Date(p.end || p.start);
+      return { name: MONTHS[s.getMonth()].slice(0, 3), days: Math.round((e - s) / 86400000) + 1 };
     });
   }
 
   function getFlowData() {
     const counts = { Light: 0, Medium: 0, Heavy: 0 };
-    Object.values(data.flows || {}).forEach(f => {
-      if (counts[f] !== undefined) counts[f]++;
-    });
+    Object.values(data.flows || {}).forEach(f => { if (counts[f] !== undefined) counts[f]++; });
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }
 
   function exportCSV() {
     const rows = [["Date", "Type", "Flow", "Mood", "Symptoms", "Notes"]];
     data.periods.forEach(p => {
-      const s = new Date(p.start);
-      const e = new Date(p.end || p.start);
+      const s = new Date(p.start), e = new Date(p.end || p.start);
       for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
         const ds = toDateStr(new Date(d));
         rows.push([ds, "Period", data.flows?.[ds] || "", data.moods?.[ds] || "",
@@ -317,26 +403,22 @@ export default function App() {
       }
     });
     Object.keys(data.moods || {}).forEach(ds => {
-      if (!periodDates.has(ds)) {
+      if (!periodDates.has(ds))
         rows.push([ds, "Log", "", data.moods[ds] || "",
           (data.symptoms?.[ds] || []).join("; "), data.notes?.[ds] || ""]);
-      }
     });
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "cyra_data.csv"; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = "cyra_data.csv"; a.click();
     URL.revokeObjectURL(url);
   }
 
   function prevMonth() {
-    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
-    else setViewMonth(m => m - 1);
+    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); } else setViewMonth(m => m - 1);
   }
   function nextMonth() {
-    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
-    else setViewMonth(m => m + 1);
+    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); } else setViewMonth(m => m + 1);
   }
 
   function handleDateClick(dateStr) {
@@ -345,8 +427,7 @@ export default function App() {
       const start = rangeStart < dateStr ? rangeStart : dateStr;
       const end = rangeStart < dateStr ? dateStr : rangeStart;
       setData(prev => ({ ...prev, periods: [...prev.periods, { start, end, id: Date.now() }] }));
-      setRangeStart(null); setMarkingMode(false);
-      return;
+      setRangeStart(null); setMarkingMode(false); return;
     }
     setSelectedDate(dateStr);
     setNoteText(data.notes?.[dateStr] || "");
@@ -387,11 +468,8 @@ export default function App() {
     const val = pinInput + digit;
     setPinInput(val);
     if (val.length === 4) {
-      const stored = localStorage.getItem(PIN_KEY);
-      if (val === stored) {
-        setPinLocked(false);
-        setPinInput("");
-        setPinError("");
+      if (val === localStorage.getItem(PIN_KEY)) {
+        setPinLocked(false); setPinInput(""); setPinError("");
       } else {
         setPinError("Incorrect PIN. Try again.");
         setTimeout(() => { setPinInput(""); setPinError(""); }, 1000);
@@ -402,28 +480,21 @@ export default function App() {
   function handleSetPin() {
     if (pinStep === 1) {
       if (newPin.length !== 4) { setPinError("PIN must be 4 digits"); return; }
-      setPinStep(2);
-      setPinError("");
+      setPinStep(2); setPinError("");
     } else {
       if (confirmPin !== newPin) {
         setPinError("PINs don't match. Try again.");
-        setConfirmPin(""); setPinStep(1); setNewPin("");
-        return;
+        setConfirmPin(""); setPinStep(1); setNewPin(""); return;
       }
       localStorage.setItem(PIN_KEY, newPin);
-      setShowSetPin(false); setNewPin(""); setConfirmPin("");
-      setPinStep(1); setPinError("");
+      setShowSetPin(false); setNewPin(""); setConfirmPin(""); setPinStep(1); setPinError("");
     }
   }
 
-  function removePin() {
-    localStorage.removeItem(PIN_KEY);
-    setPinLocked(false);
-  }
+  function removePin() { localStorage.removeItem(PIN_KEY); setPinLocked(false); }
 
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const firstDay = getFirstDayOfMonth(viewYear, viewMonth);
-  // ── FIX: single todayStr declaration (was duplicated, causing no-unused-vars error) ──
   const todayStr = toDateStr(today);
   const daysUntil = prediction ? Math.ceil((prediction.date - today) / 86400000) : null;
   const symptomStats = getSymptomStats();
@@ -436,33 +507,64 @@ export default function App() {
   const T = isDark ? {
     bg: "#1a0a10", surface: "rgba(236,72,153,0.05)", border: "rgba(236,72,153,0.12)",
     text: "#fdf0f5", textMuted: "rgba(253,240,245,0.45)", textFaint: "rgba(253,240,245,0.3)",
-    accent: "#ec4899", accentLight: "#fb7185", modal: "#2a0e1a",
-    tabBg: "rgba(26,10,16,0.96)", glow: "rgba(236,72,153,0.18)",
-    tooltipBg: "#2a0e1a",
+    modal: "#2a0e1a", tabBg: "rgba(26,10,16,0.96)", glow: "rgba(236,72,153,0.18)", tooltipBg: "#2a0e1a",
   } : {
     bg: "#fff0f5", surface: "rgba(236,72,153,0.06)", border: "rgba(236,72,153,0.18)",
     text: "#3b0a1f", textMuted: "rgba(59,10,31,0.55)", textFaint: "rgba(59,10,31,0.35)",
-    accent: "#ec4899", accentLight: "#be185d", modal: "#fff0f5",
-    tabBg: "rgba(255,240,245,0.97)", glow: "rgba(236,72,153,0.10)",
-    tooltipBg: "#fff0f5",
+    modal: "#fff0f5", tabBg: "rgba(255,240,245,0.97)", glow: "rgba(236,72,153,0.10)", tooltipBg: "#fff0f5",
   };
 
   const circumference = 2 * Math.PI * 40;
   const strokeDashoffset = circumference - (healthScore / 100) * circumference;
 
+  // ── Splash Screen ─────────────────────────────────────────────────────────
+  if (showSplash) {
+    return (
+      <>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
+          *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+          body { background: #1a0a10; margin: 0; }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes pulse { 0%, 100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.15); } }
+          .splash-logo { animation: fadeIn 0.6s ease forwards; }
+          .splash-sub { animation: fadeIn 0.6s ease 0.3s both; }
+          .splash-dots { animation: fadeIn 0.6s ease 0.6s both; display: flex; gap: 8px; }
+          .splash-dot { width: 6px; height: 6px; border-radius: 50%; background: #ec4899; animation: pulse 1.2s ease infinite; }
+          .splash-dot:nth-child(2) { animation-delay: 0.2s; }
+          .splash-dot:nth-child(3) { animation-delay: 0.4s; }
+        `}</style>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#1a0a10", gap: 16 }}>
+          <div className="splash-logo" style={{ fontFamily: "'DM Serif Display', serif", fontSize: 48, background: "linear-gradient(135deg,#fb7185,#ec4899,#f43f5e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            🌸 Cyra
+          </div>
+          <div className="splash-sub" style={{ fontSize: 14, color: "rgba(253,240,245,0.4)", fontFamily: "'DM Sans', sans-serif" }}>
+            Your cycle, your way
+          </div>
+          <div className="splash-dots" style={{ marginTop: 24 }}>
+            <div className="splash-dot" />
+            <div className="splash-dot" />
+            <div className="splash-dot" />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ── PIN Lock Screen ───────────────────────────────────────────────────────
   if (pinLocked) {
     return (
       <>
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
           *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-          body { background: #1a0a10; color: #fdf0f5; font-family: 'DM Sans', sans-serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+          body { background: #1a0a10; color: #fdf0f5; font-family: 'DM Sans', sans-serif; min-height: 100vh; }
         `}</style>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#1a0a10", padding: 24 }}>
           <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 32, background: "linear-gradient(135deg,#fb7185,#ec4899)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 8 }}>Cyra</div>
           <div style={{ fontSize: 13, color: "rgba(253,240,245,0.4)", marginBottom: 40 }}>Enter your PIN to continue</div>
           <div style={{ display: "flex", gap: 14, marginBottom: 32 }}>
-            {[0, 1, 2, 3].map(i => (
+            {[0,1,2,3].map(i => (
               <div key={i} style={{ width: 16, height: 16, borderRadius: "50%", background: i < pinInput.length ? "#ec4899" : "rgba(236,72,153,0.2)", border: "2px solid rgba(236,72,153,0.35)", transition: "background 0.2s" }} />
             ))}
           </div>
@@ -501,7 +603,7 @@ export default function App() {
         .log-btn:hover { opacity: 0.85; }
         .log-btn.active { background: linear-gradient(135deg, #f43f5e, #ec4899); }
 
-        .reminder-banner { margin-bottom: 10px; background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 14px; padding: 11px 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+        .reminder-banner { margin-bottom: 10px; background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 14px; padding: 11px 14px; display: flex; align-items: center; gap: 10px; }
         .reminder-icon { font-size: 16px; flex-shrink: 0; }
 
         .hero { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(244,63,94,0.1)); border: 1px solid rgba(236,72,153,0.25); border-radius: 22px; padding: 22px; margin-bottom: 16px; position: relative; overflow: hidden; }
@@ -517,7 +619,7 @@ export default function App() {
         .score-num { font-family: 'DM Serif Display', serif; font-size: 26px; line-height: 1; }
         .score-max { font-size: 10px; color: ${T.textFaint}; }
         .score-right { flex: 1; }
-        .score-label { font-size: 18px; font-weight: 600; color: ${T.text}; margin-bottom: 4px; }
+        .score-label { font-size: 16px; font-weight: 600; color: ${T.text}; margin-bottom: 4px; }
         .score-tip { font-size: 12px; color: ${T.textMuted}; line-height: 1.5; }
         .score-breakdown { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
         .score-tag { background: rgba(236,72,153,0.08); border: 1px solid rgba(236,72,153,0.12); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: ${T.textMuted}; }
@@ -557,6 +659,14 @@ export default function App() {
 
         .tab-content { padding: 0 0 100px; }
         .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: ${T.textFaint}; margin-bottom: 12px; margin-top: 8px; }
+
+        /* Pattern cards */
+        .pattern-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 18px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; position: relative; overflow: hidden; }
+        .pattern-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, #ec4899, #fb7185); border-radius: 0 0 0 18px; }
+        .pattern-icon { font-size: 22px; flex-shrink: 0; width: 44px; height: 44px; background: rgba(236,72,153,0.12); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+        .pattern-title { font-size: 14px; font-weight: 500; color: ${T.text}; margin-bottom: 4px; }
+        .pattern-detail { font-size: 12px; color: ${T.textMuted}; line-height: 1.5; }
+
         .insight-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 18px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; }
         .insight-icon { font-size: 22px; flex-shrink: 0; width: 44px; height: 44px; background: rgba(236,72,153,0.12); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
         .insight-title { font-size: 14px; font-weight: 500; color: ${T.text}; margin-bottom: 3px; }
@@ -643,12 +753,9 @@ export default function App() {
               <button className="icon-btn" onClick={() => {
                 if (localStorage.getItem(PIN_KEY)) setPinLocked(true);
                 else setShowSetPin(true);
-              }} title="PIN lock">
-                🔒
-              </button>
+              }} title="PIN lock">🔒</button>
               <button className={`log-btn ${markingMode ? "active" : ""}`} onClick={() => { setMarkingMode(true); setRangeStart(null); }}>
-                <span>+</span>
-                {markingMode && !rangeStart ? "Pick start…" : "Log period"}
+                <span>+</span>{markingMode && !rangeStart ? "Pick start…" : "Log period"}
               </button>
             </div>
           </div>
@@ -669,6 +776,7 @@ export default function App() {
             </div>
           ))}
 
+          {/* ── CALENDAR TAB ── */}
           {activeTab === "calendar" && (
             <>
               <div className="hero">
@@ -713,18 +821,9 @@ export default function App() {
               </div>
 
               <div className="stats">
-                <div className="stat">
-                  <div className="stat-num">{data.periods.length}</div>
-                  <div className="stat-label">Cycles</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-num">{prediction ? prediction.cycleLength : "—"}</div>
-                  <div className="stat-label">Avg days</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-num">{totalLogged}</div>
-                  <div className="stat-label">Logged</div>
-                </div>
+                <div className="stat"><div className="stat-num">{data.periods.length}</div><div className="stat-label">Cycles</div></div>
+                <div className="stat"><div className="stat-num">{prediction ? prediction.cycleLength : "—"}</div><div className="stat-label">Avg days</div></div>
+                <div className="stat"><div className="stat-num">{totalLogged}</div><div className="stat-label">Logged</div></div>
               </div>
 
               <div className="cal-card">
@@ -765,6 +864,7 @@ export default function App() {
             </>
           )}
 
+          {/* ── SYMPTOMS TAB ── */}
           {activeTab === "symptoms" && (
             <div className="tab-content">
               <div className="section-title">Mood history</div>
@@ -772,41 +872,27 @@ export default function App() {
                 <div className="mood-row">
                   {moodStats.map(([mood, count]) => {
                     const m = MOODS.find(x => x.label === mood);
-                    return (
-                      <div key={mood} className="mood-chip">
-                        {m?.emoji} {mood} <span style={{ color: "#fb7185", fontWeight: 600 }}>×{count}</span>
-                      </div>
-                    );
+                    return <div key={mood} className="mood-chip">{m?.emoji} {mood} <span style={{ color: "#fb7185", fontWeight: 600 }}>×{count}</span></div>;
                   })}
                 </div>
               ) : (
-                <div className="empty-state">
-                  <div className="empty-icon">😊</div>
-                  No moods logged yet.<br />Tap any date on the calendar to log how you feel.
-                </div>
+                <div className="empty-state"><div className="empty-icon">😊</div>No moods logged yet.<br />Tap any date on the calendar to log how you feel.</div>
               )}
               <div className="section-title" style={{ marginTop: 20 }}>Most common symptoms</div>
               {symptomStats.length > 0 ? (
                 symptomStats.map(([symptom, count]) => (
                   <div key={symptom} className="symptom-row">
-                    <div className="symptom-row-top">
-                      <span className="symptom-name">{symptom}</span>
-                      <span className="symptom-count">{count} {count === 1 ? "time" : "times"}</span>
-                    </div>
-                    <div className="symptom-bar-bg">
-                      <div className="symptom-bar-fill" style={{ width: `${Math.min(100, (count / symptomStats[0][1]) * 100)}%` }} />
-                    </div>
+                    <div className="symptom-row-top"><span className="symptom-name">{symptom}</span><span className="symptom-count">{count} {count === 1 ? "time" : "times"}</span></div>
+                    <div className="symptom-bar-bg"><div className="symptom-bar-fill" style={{ width: `${Math.min(100, (count / symptomStats[0][1]) * 100)}%` }} /></div>
                   </div>
                 ))
               ) : (
-                <div className="empty-state">
-                  <div className="empty-icon">💊</div>
-                  No symptoms logged yet.<br />Tap any date on the calendar to track symptoms.
-                </div>
+                <div className="empty-state"><div className="empty-icon">💊</div>No symptoms logged yet.<br />Tap any date on the calendar to track symptoms.</div>
               )}
             </div>
           )}
 
+          {/* ── CHARTS TAB ── */}
           {activeTab === "charts" && (
             <div className="tab-content">
               <button className="export-btn" onClick={exportCSV}>📤 Export my data as CSV</button>
@@ -816,22 +902,16 @@ export default function App() {
                   <div className="chart-sub">How many days between each period</div>
                   <ResponsiveContainer width="100%" height={180}>
                     <LineChart data={cycleLengthData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={`${T.border}`} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                       <XAxis dataKey="name" tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
-                      <Tooltip contentStyle={{ background: T.tooltipBg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12, padding: "6px 12px" }} formatter={(v) => [`${v} days`, "Cycle length"]} />
+                      <Tooltip contentStyle={{ background: T.tooltipBg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12 }} formatter={(v) => [`${v} days`, "Cycle length"]} />
                       <Line type="monotone" dataKey="days" stroke="#ec4899" strokeWidth={2.5} dot={{ fill: "#ec4899", r: 4 }} activeDot={{ r: 6 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <div className="chart-card">
-                  <div className="chart-title">Cycle length over time</div>
-                  <div className="empty-state" style={{ padding: "20px 0" }}>
-                    <div className="empty-icon">📊</div>
-                    Log at least 2 periods to see your cycle chart.
-                  </div>
-                </div>
+                <div className="chart-card"><div className="chart-title">Cycle length over time</div><div className="empty-state" style={{ padding: "20px 0" }}><div className="empty-icon">📊</div>Log at least 2 periods to see your cycle chart.</div></div>
               )}
               {periodDurationData.length > 0 && (
                 <div className="chart-card">
@@ -839,10 +919,10 @@ export default function App() {
                   <div className="chart-sub">How many days each period lasted</div>
                   <ResponsiveContainer width="100%" height={160}>
                     <BarChart data={periodDurationData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={`${T.border}`} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                       <XAxis dataKey="name" tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ background: T.tooltipBg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12, padding: "6px 12px" }} formatter={(v) => [`${v} days`, "Duration"]} />
+                      <Tooltip contentStyle={{ background: T.tooltipBg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12 }} formatter={(v) => [`${v} days`, "Duration"]} />
                       <Bar dataKey="days" fill="#ec4899" radius={[6, 6, 0, 0]} opacity={0.85} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -854,27 +934,40 @@ export default function App() {
                   <div className="chart-sub">Distribution of your logged flow levels</div>
                   <ResponsiveContainer width="100%" height={160}>
                     <BarChart data={flowData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={`${T.border}`} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
                       <XAxis dataKey="name" tick={{ fill: T.textFaint, fontSize: 11 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fill: T.textFaint, fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                      <Tooltip contentStyle={{ background: T.tooltipBg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12, padding: "6px 12px" }} formatter={(v) => [`${v} days`, "Days logged"]} />
+                      <Tooltip contentStyle={{ background: T.tooltipBg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12 }} formatter={(v) => [`${v} days`, "Days logged"]} />
                       <Bar dataKey="value" fill="#ec4899" radius={[6, 6, 0, 0]} opacity={0.85} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               )}
               {cycleLengthData.length === 0 && periodDurationData.length === 0 && (
-                <div className="empty-state">
-                  <div className="empty-icon">📈</div>
-                  Start logging periods and symptoms to see your health charts here.
-                </div>
+                <div className="empty-state"><div className="empty-icon">📈</div>Start logging periods and symptoms to see your health charts here.</div>
               )}
             </div>
           )}
 
+          {/* ── INSIGHTS TAB (now includes patterns) ── */}
           {activeTab === "insights" && (
             <div className="tab-content">
-              <div className="section-title">Your cycle insights</div>
+              {patterns.length > 0 && (
+                <>
+                  <div className="section-title">🔍 Detected patterns</div>
+                  {patterns.map((p, i) => (
+                    <div key={i} className="pattern-card">
+                      <div className="pattern-icon">{p.icon}</div>
+                      <div>
+                        <div className="pattern-title">{p.title}</div>
+                        <div className="pattern-detail">{p.detail}</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              <div className="section-title" style={{ marginTop: patterns.length > 0 ? 20 : 8 }}>Your cycle insights</div>
               {prediction ? (
                 <>
                   <div className="insight-card">
@@ -927,64 +1020,43 @@ export default function App() {
               ) : (
                 <div className="empty-state">
                   <div className="empty-icon">🌸</div>
-                  Log at least 2 periods to unlock predictions, fertile window, and personal insights.
+                  Log at least 2 periods to unlock predictions, patterns, and personal insights.
                 </div>
               )}
             </div>
           )}
 
+          {/* ── SETTINGS TAB ── */}
           {activeTab === "settings" && (
             <div className="tab-content">
               <div className="section-title">Appearance</div>
               <div className="settings-card">
                 <div className="settings-row">
-                  <div>
-                    <div className="settings-label">{isDark ? "Dark mode" : "Light mode"}</div>
-                    <div className="settings-sub">Switch app theme</div>
-                  </div>
-                  <label className="toggle">
-                    <input type="checkbox" checked={isDark} onChange={() => setIsDark(d => !d)} />
-                    <span className="toggle-slider" />
-                  </label>
+                  <div><div className="settings-label">{isDark ? "Dark mode" : "Light mode"}</div><div className="settings-sub">Switch app theme</div></div>
+                  <label className="toggle"><input type="checkbox" checked={isDark} onChange={() => setIsDark(d => !d)} /><span className="toggle-slider" /></label>
                 </div>
               </div>
-
               <div className="section-title">Privacy</div>
               <div className="settings-card">
                 <div className="settings-row">
-                  <div>
-                    <div className="settings-label">PIN Lock</div>
-                    <div className="settings-sub">{localStorage.getItem(PIN_KEY) ? "PIN is set — app is protected" : "No PIN set — tap to add one"}</div>
-                  </div>
-                  <button className="settings-btn" onClick={() => setShowSetPin(true)}>
-                    {localStorage.getItem(PIN_KEY) ? "Change PIN" : "Set PIN"}
-                  </button>
+                  <div><div className="settings-label">PIN Lock</div><div className="settings-sub">{localStorage.getItem(PIN_KEY) ? "PIN is set — app is protected" : "No PIN set"}</div></div>
+                  <button className="settings-btn" onClick={() => setShowSetPin(true)}>{localStorage.getItem(PIN_KEY) ? "Change PIN" : "Set PIN"}</button>
                 </div>
                 {localStorage.getItem(PIN_KEY) && (
                   <div className="settings-row">
-                    <div>
-                      <div className="settings-label">Remove PIN</div>
-                      <div className="settings-sub">Disable lock screen</div>
-                    </div>
+                    <div><div className="settings-label">Remove PIN</div><div className="settings-sub">Disable lock screen</div></div>
                     <button className="settings-btn danger" onClick={removePin}>Remove</button>
                   </div>
                 )}
               </div>
-
               <div className="section-title">Data</div>
               <div className="settings-card">
                 <div className="settings-row">
-                  <div>
-                    <div className="settings-label">Export data</div>
-                    <div className="settings-sub">Download all your cycle data as CSV</div>
-                  </div>
+                  <div><div className="settings-label">Export data</div><div className="settings-sub">Download all data as CSV</div></div>
                   <button className="settings-btn" onClick={exportCSV}>Export</button>
                 </div>
                 <div className="settings-row">
-                  <div>
-                    <div className="settings-label">Clear all data</div>
-                    <div className="settings-sub">Permanently delete all logged data</div>
-                  </div>
+                  <div><div className="settings-label">Clear all data</div><div className="settings-sub">Permanently delete everything</div></div>
                   <button className="settings-btn danger" onClick={() => {
                     if (window.confirm("Delete all Cyra data? This cannot be undone.")) {
                       localStorage.removeItem(STORAGE_KEY);
@@ -993,14 +1065,10 @@ export default function App() {
                   }}>Clear</button>
                 </div>
               </div>
-
               <div className="section-title">About</div>
               <div className="settings-card">
                 <div className="settings-row">
-                  <div>
-                    <div className="settings-label">Cyra</div>
-                    <div className="settings-sub">Your cycle, your way · v1.0</div>
-                  </div>
+                  <div><div className="settings-label">Cyra</div><div className="settings-sub">Your cycle, your way · v1.0</div></div>
                   <span style={{ fontSize: 20 }}>🌸</span>
                 </div>
               </div>
@@ -1008,38 +1076,27 @@ export default function App() {
           )}
         </div>
 
+        {/* Tab bar */}
         <div className="tab-bar">
-          <button className={`tab ${activeTab === "calendar" ? "active" : ""}`} onClick={() => setActiveTab("calendar")}>
-            <span className="tab-icon">🗓</span>Calendar
-          </button>
-          <button className={`tab ${activeTab === "symptoms" ? "active" : ""}`} onClick={() => setActiveTab("symptoms")}>
-            <span className="tab-icon">🌡</span>Symptoms
-          </button>
-          <button className={`tab ${activeTab === "charts" ? "active" : ""}`} onClick={() => setActiveTab("charts")}>
-            <span className="tab-icon">📊</span>Charts
-          </button>
-          <button className={`tab ${activeTab === "insights" ? "active" : ""}`} onClick={() => setActiveTab("insights")}>
-            <span className="tab-icon">🌸</span>Insights
-          </button>
-          <button className={`tab ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}>
-            <span className="tab-icon">⚙️</span>Settings
-          </button>
+          {[["calendar","🗓","Calendar"],["symptoms","🌡","Symptoms"],["charts","📊","Charts"],["insights","🌸","Insights"],["settings","⚙️","Settings"]].map(([id, icon, label]) => (
+            <button key={id} className={`tab ${activeTab === id ? "active" : ""}`} onClick={() => setActiveTab(id)}>
+              <span className="tab-icon">{icon}</span>{label}
+            </button>
+          ))}
         </div>
 
+        {/* Daily log modal */}
         {showModal && (
           <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
               <div className="modal-handle" />
               <div className="modal-date">{selectedDate}</div>
-              {periodDates.has(selectedDate) && (
-                <button className="btn-danger" onClick={() => removePeriod(selectedDate)}>Remove period mark</button>
-              )}
+              {periodDates.has(selectedDate) && <button className="btn-danger" onClick={() => removePeriod(selectedDate)}>Remove period mark</button>}
               <div className="modal-section-label">How are you feeling?</div>
               <div className="mood-picker">
                 {MOODS.map(m => (
                   <button key={m.label} className={`mood-btn ${selectedMood === m.label ? "selected" : ""}`} onClick={() => setSelectedMood(selectedMood === m.label ? null : m.label)}>
-                    <span className="mood-emoji">{m.emoji}</span>
-                    <span className="mood-label">{m.label}</span>
+                    <span className="mood-emoji">{m.emoji}</span><span className="mood-label">{m.label}</span>
                   </button>
                 ))}
               </div>
@@ -1047,17 +1104,13 @@ export default function App() {
                 <>
                   <div className="modal-section-label">Flow intensity</div>
                   <div className="flow-picker">
-                    {FLOW_LEVELS.map(f => (
-                      <button key={f} className={`flow-btn ${selectedFlow === f ? "selected" : ""}`} onClick={() => setSelectedFlow(selectedFlow === f ? null : f)}>{f}</button>
-                    ))}
+                    {FLOW_LEVELS.map(f => <button key={f} className={`flow-btn ${selectedFlow === f ? "selected" : ""}`} onClick={() => setSelectedFlow(selectedFlow === f ? null : f)}>{f}</button>)}
                   </div>
                 </>
               )}
               <div className="modal-section-label">Symptoms</div>
               <div className="symptom-picker">
-                {SYMPTOMS_LIST.map(s => (
-                  <button key={s} className={`symptom-btn ${selectedSymptoms.includes(s) ? "selected" : ""}`} onClick={() => toggleSymptom(s)}>{s}</button>
-                ))}
+                {SYMPTOMS_LIST.map(s => <button key={s} className={`symptom-btn ${selectedSymptoms.includes(s) ? "selected" : ""}`} onClick={() => toggleSymptom(s)}>{s}</button>)}
               </div>
               <hr className="divider" />
               <div className="modal-section-label">Notes</div>
@@ -1070,31 +1123,19 @@ export default function App() {
           </div>
         )}
 
+        {/* PIN setup modal */}
         {showSetPin && (
           <div className="overlay" onClick={() => { setShowSetPin(false); setNewPin(""); setConfirmPin(""); setPinStep(1); setPinError(""); }}>
             <div className="pin-modal" onClick={e => e.stopPropagation()}>
               <div className="pin-modal-title">{pinStep === 1 ? "Set a PIN" : "Confirm PIN"}</div>
               <div className="pin-modal-sub">{pinStep === 1 ? "Choose a 4-digit PIN to protect Cyra" : "Enter the same PIN again to confirm"}</div>
-              <input
-                className="pin-input"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                placeholder="••••"
+              <input className="pin-input" type="password" inputMode="numeric" maxLength={4} placeholder="••••"
                 value={pinStep === 1 ? newPin : confirmPin}
-                onChange={e => {
-                  const val = e.target.value.replace(/\D/g, "").slice(0, 4);
-                  pinStep === 1 ? setNewPin(val) : setConfirmPin(val);
-                }}
-              />
+                onChange={e => { const val = e.target.value.replace(/\D/g, "").slice(0, 4); pinStep === 1 ? setNewPin(val) : setConfirmPin(val); }} />
               <div className="pin-error">{pinError}</div>
               <div className="pin-actions">
-                <button className="btn-primary" onClick={handleSetPin}>
-                  {pinStep === 1 ? "Next" : "Save PIN"}
-                </button>
-                <button className="btn-secondary" onClick={() => { setShowSetPin(false); setNewPin(""); setConfirmPin(""); setPinStep(1); setPinError(""); }}>
-                  Cancel
-                </button>
+                <button className="btn-primary" onClick={handleSetPin}>{pinStep === 1 ? "Next" : "Save PIN"}</button>
+                <button className="btn-secondary" onClick={() => { setShowSetPin(false); setNewPin(""); setConfirmPin(""); setPinStep(1); setPinError(""); }}>Cancel</button>
               </div>
             </div>
           </div>

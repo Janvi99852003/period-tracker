@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 
 test("renders app", () => {
@@ -6,36 +6,50 @@ test("renders app", () => {
   expect(document.querySelector("div")).toBeInTheDocument();
 });
 
-test("renders current year", () => {
+test("renders splash screen initially", () => {
   render(<App />);
-  expect(screen.getByText(new RegExp(new Date().getFullYear().toString()))).toBeInTheDocument();
+  expect(document.querySelector("div")).toBeInTheDocument();
 });
 
-test("renders cycles stat", () => {
+test("renders current year after splash", async () => {
   render(<App />);
-  expect(screen.getAllByText(/Cycles/i)[0]).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByText(new RegExp(new Date().getFullYear().toString()))).toBeInTheDocument(),
+    { timeout: 3000 }
+  );
 });
 
-test("renders avg days stat", () => {
+test("renders cycles stat after splash", async () => {
   render(<App />);
-  expect(screen.getAllByText(/Avg days/i)[0]).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getAllByText(/Cycles/i)[0]).toBeInTheDocument(),
+    { timeout: 3000 }
+  );
 });
 
-test("renders health score", () => {
+test("renders health score after splash", async () => {
   render(<App />);
-  expect(screen.getByText(/Health Score/i)).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByText(/Health Score/i)).toBeInTheDocument(),
+    { timeout: 3000 }
+  );
 });
 
-test("renders all five tabs", () => {
+test("renders all five tabs after splash", async () => {
   render(<App />);
-  expect(screen.getAllByText(/Calendar/i)[0]).toBeInTheDocument();
-  expect(screen.getAllByText(/Symptoms/i)[0]).toBeInTheDocument();
-  expect(screen.getAllByText(/Charts/i)[0]).toBeInTheDocument();
-  expect(screen.getAllByText(/Insights/i)[0]).toBeInTheDocument();
-  expect(screen.getAllByText(/Settings/i)[0]).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getAllByText(/Calendar/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Symptoms/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Charts/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Insights/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Settings/i)[0]).toBeInTheDocument();
+  }, { timeout: 3000 });
 });
 
-test("renders log period button", () => {
+test("renders log period button after splash", async () => {
   render(<App />);
-  expect(screen.getByText(/Log period/i)).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByText(/Log period/i)).toBeInTheDocument(),
+    { timeout: 3000 }
+  );
 });

@@ -1,70 +1,194 @@
-# Getting Started with Create React App
+# 🌸 Cyra — Period & Cycle Tracker
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+> **Your cycle, your way.** A smart, private period tracking app built with React.
 
-## Available Scripts
+[![CI/CD](https://github.com/YOUR_USERNAME/period-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/period-tracker/actions)
+[![Live Demo](https://img.shields.io/badge/demo-live-ec4899)](https://YOUR_APP.vercel.app)
 
-In the project directory, you can run:
+---
 
-### `npm start`
+## 🔗 Live Demo
+**[cyra.vercel.app](https://YOUR_APP.vercel.app)** — try it in your browser, no account needed.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+---
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## ✨ Features
 
-### `npm test`
+### 📅 Period Tracking
+- Two-click period logging on an interactive calendar
+- Visual period, prediction, and fertile window markers
+- Navigate across months with smooth calendar navigation
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### 🔮 Cycle Prediction Algorithm
+- Averages gaps between past cycles to predict the next period
+- Calculates ovulation and fertile window automatically
+- Shows a live countdown: *"Next period in 12 days"*
 
-### `npm run build`
+### 💯 Health Score Engine
+- Scores your cycle health 0–100 across 4 factors: logging consistency, cycle regularity, mood pattern, and symptom load
+- Animated SVG ring with colour coding (green / yellow / red)
+- Personalised tip based on what's dragging your score down
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+### 🔍 Pattern Detection
+- Automatically detects trends like *"Your cycle is getting shorter"*
+- Finds recurring symptoms on specific cycle days (*"Cramps often on Day 2"*)
+- Detects pre-period mood patterns (*"You tend to feel Irritable before your period"*)
+- Identifies heaviest flow days and consistent period durations
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### 😊 Daily Health Log
+- Mood tracker with 5 emoji moods
+- 8 symptom tags (Cramps, Bloating, Headache, Fatigue, and more)
+- Flow intensity: Light / Medium / Heavy
+- Personal notes on any date
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### 📊 Data Visualisation
+- Cycle length line chart over time (Recharts)
+- Period duration bar chart
+- Flow intensity distribution chart
+- Symptom frequency bar chart with ranking
 
-### `npm run eject`
+### 🔒 Privacy & Security
+- 4-digit PIN lock screen with numeric keypad
+- All data stored locally — never leaves the device
+- One-click data export as CSV
+- Clear all data option
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### 🔔 Smart Reminders
+- Period due soon banner (3 days before)
+- Fertile window alert
+- Logging reminder if inactive for 3+ days
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+### ⚙️ Settings
+- Dark / Light mode toggle (persisted across sessions)
+- PIN management (set, change, remove)
+- CSV data export
+- Clear all data
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+---
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## 🛠 Tech Stack
 
-## Learn More
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18 (hooks only, no class components) |
+| Charts | Recharts |
+| Styling | CSS-in-JS (inline `<style>` with theme tokens) |
+| Storage | localStorage (client-side persistence) |
+| Icons | Lucide React |
+| Testing | Jest + React Testing Library |
+| CI/CD | GitHub Actions |
+| Hosting | Vercel (auto-deploy on push to main) |
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+---
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## 🏗 Architecture Decisions
 
-### Code Splitting
+**Why localStorage over a backend?**
+For a period tracker, keeping sensitive health data on the user's device by default is a deliberate privacy choice. A Firebase backend is planned for Day 6 to support multi-device sync for users who opt in.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+**Why a custom prediction algorithm over a library?**
+The weighted-average cycle prediction is simple enough to implement cleanly in ~15 lines and is fully explainable. Third-party health libraries add dependency risk without meaningful accuracy gains for this use case.
 
-### Analyzing the Bundle Size
+**Why Recharts over D3?**
+Recharts provides declarative, React-idiomatic chart components that integrate cleanly with React state. D3 would require imperative DOM manipulation that fights against React's rendering model.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+---
 
-### Making a Progressive Web App
+## 🚀 Getting Started
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+### Prerequisites
+- Node.js 18+
+- npm
 
-### Advanced Configuration
+### Installation
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+```bash
+git clone https://github.com/YOUR_USERNAME/period-tracker.git
+cd period-tracker
+npm install
+npm start
+```
 
-### Deployment
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+### Running Tests
 
-### `npm run build` fails to minify
+```bash
+npm test -- --watchAll=false
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+### Building for Production
+
+```bash
+npm run build
+```
+
+---
+
+## ⚙️ CI/CD Pipeline
+
+Every push to `main` triggers a GitHub Actions workflow:
+
+```
+Push to main
+    │
+    ▼
+[Test & Build]
+  • npm install
+  • npm test
+  • npm run build
+    │
+    ▼ (only if tests pass)
+[Deploy]
+  • Auto-deploy to Vercel
+  • Live URL updates in ~60 seconds
+```
+
+Pull requests run tests only — never deploy to production.
+
+---
+
+## 📁 Project Structure
+
+```
+period-tracker/
+├── .github/
+│   └── workflows/
+│       └── ci.yml          # GitHub Actions pipeline
+├── src/
+│   ├── App.js              # Main app (single-file architecture)
+│   ├── App.test.js         # Jest + RTL tests
+│   └── index.js            # React entry point
+├── public/
+│   └── index.html          # HTML shell
+└── package.json
+```
+
+---
+
+## 🗺 Roadmap
+
+- [x] Calendar UI with period logging
+- [x] Cycle prediction algorithm
+- [x] Symptoms, mood, and flow tracking
+- [x] Recharts data visualisation
+- [x] Health Score engine
+- [x] Pattern detection
+- [x] PIN lock and privacy controls
+- [x] Dark / light mode
+- [x] CSV export
+- [x] CI/CD pipeline
+- [ ] Firebase authentication
+- [ ] Firestore cloud sync
+- [ ] Gemini AI health assistant
+- [ ] Push notifications
+
+---
+
+## 👩‍💻 Author
+
+Built by **[JANVI JAISWAL]** · [LinkedIn](https://www.linkedin.com/in/janvi-jaiswal-72415b307/) · [GitHub](https://github.com/Janvi99852003)
+
+---
+
+<p align="center">Made with 🌸 and React</p>
