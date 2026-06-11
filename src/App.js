@@ -1,22 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { supabase } from "./supabase";
 
-const STORAGE_KEY = "cyra_data";
 const PIN_KEY = "cyra_pin";
 const THEME_KEY = "cyra_theme";
-
-function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : { periods: [], notes: {}, moods: {}, flows: {}, symptoms: {} };
-  } catch {
-    return { periods: [], notes: {}, moods: {}, flows: {}, symptoms: {} };
-  }
-}
-
-function saveData(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
 
 function toDateStr(date) {
   return date.toISOString().split("T")[0];
@@ -49,11 +36,12 @@ const SYMPTOMS_LIST = [
 
 const FLOW_LEVELS = ["Light", "Medium", "Heavy"];
 
+const EMPTY_DATA = { periods: [], notes: {}, moods: {}, flows: {}, symptoms: {} };
+
 // ── Health Score Algorithm ────────────────────────────────────────────────
 function calculateHealthScore(data) {
   let score = 0;
   const today = new Date();
-
   let loggedDays = 0;
   for (let i = 0; i < 14; i++) {
     const d = new Date(today); d.setDate(d.getDate() - i);
@@ -61,7 +49,6 @@ function calculateHealthScore(data) {
     if (data.moods?.[ds] || (data.symptoms?.[ds] || []).length > 0 || data.notes?.[ds]) loggedDays++;
   }
   score += Math.round((loggedDays / 14) * 30);
-
   if (data.periods.length >= 2) {
     const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
     const gaps = [];
@@ -71,7 +58,6 @@ function calculateHealthScore(data) {
     const variance = gaps.reduce((sum, g) => sum + Math.abs(g - avg), 0) / gaps.length;
     score += Math.max(0, 25 - Math.round(variance * 3.5));
   }
-
   const recentMoods = [];
   for (let i = 0; i < 14; i++) {
     const d = new Date(today); d.setDate(d.getDate() - i);
@@ -82,7 +68,6 @@ function calculateHealthScore(data) {
     const positive = recentMoods.filter(m => m === "Happy" || m === "Calm").length;
     score += Math.round((positive / recentMoods.length) * 25);
   } else { score += 12; }
-
   const recentSymptomDays = [];
   for (let i = 0; i < 14; i++) {
     const d = new Date(today); d.setDate(d.getDate() - i);
@@ -90,7 +75,6 @@ function calculateHealthScore(data) {
   }
   const avgSymptoms = recentSymptomDays.reduce((a, b) => a + b, 0) / 14;
   score += Math.max(5, 20 - Math.round(avgSymptoms * 3));
-
   return Math.min(100, Math.max(0, score));
 }
 
@@ -119,14 +103,10 @@ function getScoreTip(score, data) {
 }
 
 // ── Pattern Detection Engine ──────────────────────────────────────────────
-// Analyses logged data and returns human-readable insight cards
 function detectPatterns(data) {
   const patterns = [];
   if (data.periods.length < 2) return patterns;
-
   const sorted = [...data.periods].sort((a, b) => new Date(a.start) - new Date(b.start));
-
-  // 1. Cycle trend — is it getting shorter or longer?
   if (sorted.length >= 3) {
     const gaps = [];
     for (let i = 1; i < sorted.length; i++)
@@ -145,9 +125,7 @@ function detectPatterns(data) {
       });
     }
   }
-
-  // 2. Consistent symptom on specific cycle day
-  const symptomOnDay = {}; // symptom -> { dayN -> count }
+  const symptomOnDay = {};
   sorted.forEach(period => {
     const start = new Date(period.start);
     const end = new Date(period.end || period.start);
@@ -161,7 +139,6 @@ function detectPatterns(data) {
       });
     }
   });
-
   Object.entries(symptomOnDay).forEach(([symptom, dayCounts]) => {
     const topDay = Object.entries(dayCounts).sort((a, b) => b[1] - a[1])[0];
     if (topDay && topDay[1] >= 2 && topDay[1] / sorted.length >= 0.5) {
@@ -173,8 +150,6 @@ function detectPatterns(data) {
       });
     }
   });
-
-  // 3. Mood before period — do you tend to feel a certain way in the 3 days before?
   const prePeriodMoods = {};
   sorted.forEach(period => {
     const start = new Date(period.start);
@@ -194,8 +169,6 @@ function detectPatterns(data) {
       type: "mood",
     });
   }
-
-  // 4. Period duration consistency
   const durations = sorted.map(p => {
     const s = new Date(p.start), e = new Date(p.end || p.start);
     return Math.round((e - s) / 86400000) + 1;
@@ -207,14 +180,12 @@ function detectPatterns(data) {
       patterns.push({
         icon: "⏱️",
         title: `Very consistent period duration`,
-        detail: `Your periods consistently last around ${Math.round(avg)} days. This is a healthy regularity sign.`,
+        detail: `Your periods consistently last around ${Math.round(avg)} days.`,
         type: "duration",
       });
     }
   }
-
-  // 5. Heaviest flow day pattern
-  const flowByDay = {}; // dayN -> { Heavy: n, Medium: n, Light: n }
+  const flowByDay = {};
   sorted.forEach(period => {
     const start = new Date(period.start);
     const end = new Date(period.end || period.start);
@@ -236,17 +207,105 @@ function detectPatterns(data) {
     patterns.push({
       icon: "💧",
       title: `Day ${heaviestDay} is usually your heaviest`,
-      detail: `You logged Heavy flow on Day ${heaviestDay} in ${heaviestCount} cycles. Plan ahead on those days.`,
+      detail: `You logged Heavy flow on Day ${heaviestDay} in ${heaviestCount} cycles.`,
       type: "flow",
     });
   }
-
   return patterns;
 }
 
+// ── Auth Screen ───────────────────────────────────────────────────────────
+function AuthScreen({ onAuth }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit() {
+    setError(""); setMessage(""); setLoading(true);
+    try {
+      if (isLogin) {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        onAuth(data.user);
+      } else {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        if (data.user && data.session) {
+          onAuth(data.user);
+        } else {
+          setMessage("Account created! Please check your email to confirm, then log in.");
+          setIsLogin(true);
+        }
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #1a0a10; color: #fdf0f5; font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+      `}</style>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#1a0a10", padding: 24 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 40, background: "linear-gradient(135deg,#fb7185,#ec4899,#f43f5e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 8 }}>🌸 Cyra</div>
+        <div style={{ fontSize: 13, color: "rgba(253,240,245,0.4)", marginBottom: 40 }}>Your cycle, your way</div>
+
+        <div style={{ width: "100%", maxWidth: 360, background: "rgba(236,72,153,0.06)", border: "1px solid rgba(236,72,153,0.15)", borderRadius: 24, padding: 28 }}>
+          <div style={{ fontSize: 20, fontWeight: 600, color: "#fdf0f5", marginBottom: 6 }}>{isLogin ? "Welcome back" : "Create account"}</div>
+          <div style={{ fontSize: 13, color: "rgba(253,240,245,0.4)", marginBottom: 24 }}>{isLogin ? "Sign in to access your data" : "Start tracking your cycle"}</div>
+
+          {message && <div style={{ background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)", borderRadius: 12, padding: "10px 14px", fontSize: 13, color: "#6ee7b7", marginBottom: 16 }}>{message}</div>}
+          {error && <div style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 12, padding: "10px 14px", fontSize: 13, color: "#f87171", marginBottom: 16 }}>{error}</div>}
+
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "rgba(253,240,245,0.4)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>Email</div>
+            <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="you@example.com"
+              style={{ width: "100%", background: "rgba(236,72,153,0.06)", border: "1px solid rgba(236,72,153,0.15)", borderRadius: 12, padding: "12px 14px", color: "#fdf0f5", fontFamily: "inherit", fontSize: 14, outline: "none" }} />
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 12, color: "rgba(253,240,245,0.4)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>Password</div>
+            <input value={password} onChange={e => setPassword(e.target.value)} type="password" placeholder="••••••••"
+              style={{ width: "100%", background: "rgba(236,72,153,0.06)", border: "1px solid rgba(236,72,153,0.15)", borderRadius: 12, padding: "12px 14px", color: "#fdf0f5", fontFamily: "inherit", fontSize: 14, outline: "none" }} />
+          </div>
+
+          <button onClick={handleSubmit} disabled={loading}
+            style={{ width: "100%", background: "linear-gradient(135deg,#ec4899,#be185d)", color: "#fff", border: "none", borderRadius: 14, padding: 14, fontSize: 15, fontWeight: 500, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: loading ? 0.7 : 1, marginBottom: 16 }}>
+            {loading ? "Please wait…" : isLogin ? "Sign in" : "Create account"}
+          </button>
+
+          <div style={{ textAlign: "center", fontSize: 13, color: "rgba(253,240,245,0.4)" }}>
+            {isLogin ? "Don't have an account? " : "Already have an account? "}
+            <span onClick={() => { setIsLogin(!isLogin); setError(""); setMessage(""); }} style={{ color: "#fb7185", cursor: "pointer", fontWeight: 500 }}>
+              {isLogin ? "Sign up" : "Sign in"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────
 export default function App() {
   const today = new Date();
-  const [data, setData] = useState(loadData);
+
+  // Auth state
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Data state
+  const [data, setData] = useState(EMPTY_DATA);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(""); // "saving" | "saved" | ""
+
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [markingMode, setMarkingMode] = useState(false);
@@ -259,14 +318,11 @@ export default function App() {
   const [selectedSymptoms, setSelectedSymptoms] = useState([]);
   const [activeTab, setActiveTab] = useState("calendar");
 
-  // Splash screen
+  // Splash
   const [showSplash, setShowSplash] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setShowSplash(false), 1800);
-    return () => clearTimeout(t);
-  }, []);
+  useEffect(() => { const t = setTimeout(() => setShowSplash(false), 1800); return () => clearTimeout(t); }, []);
 
-  // PIN state
+  // PIN
   const [pinLocked, setPinLocked] = useState(() => !!localStorage.getItem(PIN_KEY));
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
@@ -281,9 +337,89 @@ export default function App() {
     return saved === null ? true : saved === "dark";
   });
 
-  useEffect(() => { saveData(data); }, [data]);
   useEffect(() => { localStorage.setItem(THEME_KEY, isDark ? "dark" : "light"); }, [isDark]);
 
+  // ── Auth listener ─────────────────────────────────────────────────────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Load data from Supabase ───────────────────────────────────────────
+  const loadFromSupabase = useCallback(async (userId) => {
+    setDataLoading(true);
+    try {
+      const { data: rows, error } = await supabase
+        .from("cyra_data")
+        .select("*")
+        .eq("user_id", userId)
+        .single();
+      if (error && error.code !== "PGRST116") throw error;
+      if (rows) {
+        setData({
+          periods: rows.periods || [],
+          notes: rows.notes || {},
+          moods: rows.moods || {},
+          flows: rows.flows || {},
+          symptoms: rows.symptoms || {},
+        });
+      } else {
+        setData(EMPTY_DATA);
+      }
+    } catch (err) {
+      console.error("Load error:", err);
+    } finally {
+      setDataLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) loadFromSupabase(user.id);
+    else setData(EMPTY_DATA);
+  }, [user, loadFromSupabase]);
+
+  // ── Save data to Supabase ─────────────────────────────────────────────
+  const saveToSupabase = useCallback(async (newData, userId) => {
+    if (!userId) return;
+    setSaveStatus("saving");
+    try {
+      const { error } = await supabase
+        .from("cyra_data")
+        .upsert({
+          user_id: userId,
+          periods: newData.periods,
+          notes: newData.notes,
+          moods: newData.moods,
+          flows: newData.flows,
+          symptoms: newData.symptoms,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id" });
+      if (error) throw error;
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(""), 2000);
+    } catch (err) {
+      console.error("Save error:", err);
+      setSaveStatus("");
+    }
+  }, []);
+
+  function updateData(newData) {
+    setData(newData);
+    if (user) saveToSupabase(newData, user.id);
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    setData(EMPTY_DATA);
+  }
+
+  // ── Period helpers ────────────────────────────────────────────────────
   const periodDates = new Set();
   data.periods.forEach(({ start, end }) => {
     const s = new Date(start), e = new Date(end || start);
@@ -332,11 +468,7 @@ export default function App() {
     if (prediction) {
       const daysUntil = Math.ceil((prediction.date - today) / 86400000);
       if (daysUntil >= 0 && daysUntil <= 3) {
-        reminders.push({
-          icon: "🌸",
-          text: daysUntil === 0 ? "Your period may start today" : `Period expected in ${daysUntil} day${daysUntil === 1 ? "" : "s"}`,
-          color: "#fb7185",
-        });
+        reminders.push({ icon: "🌸", text: daysUntil === 0 ? "Your period may start today" : `Period expected in ${daysUntil} day${daysUntil === 1 ? "" : "s"}`, color: "#fb7185" });
       }
       const fertileStart = new Date(prediction.date); fertileStart.setDate(fertileStart.getDate() - 16);
       const fertileEnd = new Date(prediction.date); fertileEnd.setDate(fertileEnd.getDate() - 12);
@@ -426,7 +558,7 @@ export default function App() {
       if (!rangeStart) { setRangeStart(dateStr); return; }
       const start = rangeStart < dateStr ? rangeStart : dateStr;
       const end = rangeStart < dateStr ? dateStr : rangeStart;
-      setData(prev => ({ ...prev, periods: [...prev.periods, { start, end, id: Date.now() }] }));
+      updateData({ ...data, periods: [...data.periods, { start, end, id: Date.now() }] });
       setRangeStart(null); setMarkingMode(false); return;
     }
     setSelectedDate(dateStr);
@@ -442,24 +574,24 @@ export default function App() {
   }
 
   function saveLog() {
-    setData(prev => ({
-      ...prev,
-      notes: { ...prev.notes, [selectedDate]: noteText },
-      moods: { ...prev.moods, [selectedDate]: selectedMood },
-      flows: { ...prev.flows, [selectedDate]: selectedFlow },
-      symptoms: { ...prev.symptoms, [selectedDate]: selectedSymptoms },
-    }));
+    updateData({
+      ...data,
+      notes: { ...data.notes, [selectedDate]: noteText },
+      moods: { ...data.moods, [selectedDate]: selectedMood },
+      flows: { ...data.flows, [selectedDate]: selectedFlow },
+      symptoms: { ...data.symptoms, [selectedDate]: selectedSymptoms },
+    });
     setShowModal(false);
   }
 
   function removePeriod(dateStr) {
-    setData(prev => ({
-      ...prev,
-      periods: prev.periods.filter(p => {
+    updateData({
+      ...data,
+      periods: data.periods.filter(p => {
         const s = new Date(p.start), e = new Date(p.end || p.start), d = new Date(dateStr);
         return !(d >= s && d <= e);
       })
-    }));
+    });
     setShowModal(false);
   }
 
@@ -517,7 +649,7 @@ export default function App() {
   const circumference = 2 * Math.PI * 40;
   const strokeDashoffset = circumference - (healthScore / 100) * circumference;
 
-  // ── Splash Screen ─────────────────────────────────────────────────────────
+  // ── Show splash ───────────────────────────────────────────────────────
   if (showSplash) {
     return (
       <>
@@ -535,23 +667,22 @@ export default function App() {
           .splash-dot:nth-child(3) { animation-delay: 0.4s; }
         `}</style>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#1a0a10", gap: 16 }}>
-          <div className="splash-logo" style={{ fontFamily: "'DM Serif Display', serif", fontSize: 48, background: "linear-gradient(135deg,#fb7185,#ec4899,#f43f5e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            🌸 Cyra
-          </div>
-          <div className="splash-sub" style={{ fontSize: 14, color: "rgba(253,240,245,0.4)", fontFamily: "'DM Sans', sans-serif" }}>
-            Your cycle, your way
-          </div>
-          <div className="splash-dots" style={{ marginTop: 24 }}>
-            <div className="splash-dot" />
-            <div className="splash-dot" />
-            <div className="splash-dot" />
-          </div>
+          <div className="splash-logo" style={{ fontFamily: "'DM Serif Display', serif", fontSize: 48, background: "linear-gradient(135deg,#fb7185,#ec4899,#f43f5e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>🌸 Cyra</div>
+          <div className="splash-sub" style={{ fontSize: 14, color: "rgba(253,240,245,0.4)", fontFamily: "'DM Sans', sans-serif" }}>Your cycle, your way</div>
+          <div className="splash-dots" style={{ marginTop: 24 }}><div className="splash-dot" /><div className="splash-dot" /><div className="splash-dot" /></div>
         </div>
       </>
     );
   }
 
-  // ── PIN Lock Screen ───────────────────────────────────────────────────────
+  // ── Show auth if not logged in ────────────────────────────────────────
+  if (authLoading) {
+    return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#1a0a10", color: "#ec4899", fontSize: 14 }}>Loading…</div>;
+  }
+
+  if (!user) return <AuthScreen onAuth={setUser} />;
+
+  // ── PIN lock ──────────────────────────────────────────────────────────
   if (pinLocked) {
     return (
       <>
@@ -574,7 +705,7 @@ export default function App() {
               <button key={i} onClick={() => {
                 if (d === "⌫") setPinInput(p => p.slice(0, -1));
                 else if (d !== "") handlePinInput(String(d));
-              }} style={{ width: 72, height: 72, borderRadius: 18, background: d === "" ? "transparent" : "rgba(236,72,153,0.08)", border: d === "" ? "none" : "1px solid rgba(236,72,153,0.15)", color: "#fdf0f5", fontSize: d === "⌫" ? 20 : 22, fontFamily: "'DM Sans', sans-serif", cursor: d === "" ? "default" : "pointer", fontWeight: 500, transition: "all 0.15s" }}>
+              }} style={{ width: 72, height: 72, borderRadius: 18, background: d === "" ? "transparent" : "rgba(236,72,153,0.08)", border: d === "" ? "none" : "1px solid rgba(236,72,153,0.15)", color: "#fdf0f5", fontSize: d === "⌫" ? 20 : 22, fontFamily: "'DM Sans', sans-serif", cursor: d === "" ? "default" : "pointer", fontWeight: 500 }}>
                 {d}
               </button>
             ))}
@@ -584,6 +715,7 @@ export default function App() {
     );
   }
 
+  // ── Main App UI ───────────────────────────────────────────────────────
   return (
     <>
       <style>{`
@@ -592,27 +724,23 @@ export default function App() {
         body { background: ${T.bg}; color: ${T.text}; font-family: 'DM Sans', sans-serif; min-height: 100vh; transition: background 0.3s, color 0.3s; }
         .app { max-width: 420px; margin: 0 auto; min-height: 100vh; background: ${T.bg}; position: relative; overflow-x: hidden; }
         .app::before { content: ''; position: fixed; top: -80px; left: 50%; transform: translateX(-50%); width: 500px; height: 380px; background: radial-gradient(ellipse, ${T.glow} 0%, transparent 70%); pointer-events: none; z-index: 0; }
-
         .header { padding: 20px 20px 0; position: relative; z-index: 1; }
         .header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; gap: 8px; }
         .logo { font-family: 'DM Serif Display', serif; font-size: 28px; background: linear-gradient(135deg, #fb7185, #ec4899, #f43f5e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
         .header-actions { display: flex; align-items: center; gap: 8px; }
+        .save-badge { font-size: 11px; color: ${saveStatus === "saved" ? "#34d399" : "#fbbf24"}; background: ${saveStatus === "saved" ? "rgba(52,211,153,0.1)" : "rgba(251,191,36,0.1)"}; border: 1px solid ${saveStatus === "saved" ? "rgba(52,211,153,0.2)" : "rgba(251,191,36,0.2)"}; border-radius: 20px; padding: 3px 10px; }
         .icon-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid ${T.border}; background: ${T.surface}; color: ${T.text}; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
         .icon-btn:hover { background: rgba(236,72,153,0.15); }
         .log-btn { background: linear-gradient(135deg, #ec4899, #be185d); color: #fff; border: none; border-radius: 20px; padding: 8px 18px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: opacity 0.2s; display: flex; align-items: center; gap: 6px; }
         .log-btn:hover { opacity: 0.85; }
         .log-btn.active { background: linear-gradient(135deg, #f43f5e, #ec4899); }
-
         .reminder-banner { margin-bottom: 10px; background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 14px; padding: 11px 14px; display: flex; align-items: center; gap: 10px; }
-        .reminder-icon { font-size: 16px; flex-shrink: 0; }
-
         .hero { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(244,63,94,0.1)); border: 1px solid rgba(236,72,153,0.25); border-radius: 22px; padding: 22px; margin-bottom: 16px; position: relative; overflow: hidden; }
         .hero::after { content: '🌸'; position: absolute; right: 18px; top: 50%; transform: translateY(-50%); font-size: 52px; opacity: 0.18; }
         .hero-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: #fb7185; margin-bottom: 6px; }
         .hero-number { font-family: 'DM Serif Display', serif; font-size: 56px; line-height: 1; background: linear-gradient(135deg, #fb7185, #f43f5e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 4px; }
         .hero-sub { font-size: 13px; color: ${T.textMuted}; }
         .hero-empty { font-size: 14px; color: ${T.textMuted}; line-height: 1.6; }
-
         .score-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 22px; padding: 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 20px; }
         .score-ring-wrap { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
         .score-number { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
@@ -623,12 +751,10 @@ export default function App() {
         .score-tip { font-size: 12px; color: ${T.textMuted}; line-height: 1.5; }
         .score-breakdown { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
         .score-tag { background: rgba(236,72,153,0.08); border: 1px solid rgba(236,72,153,0.12); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: ${T.textMuted}; }
-
         .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px; }
         .stat { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 16px; padding: 14px 10px; text-align: center; }
         .stat-num { font-family: 'DM Serif Display', serif; font-size: 26px; color: #fb7185; line-height: 1; margin-bottom: 4px; }
         .stat-label { font-size: 10px; color: ${T.textFaint}; text-transform: uppercase; letter-spacing: 0.06em; }
-
         .cal-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 22px; padding: 18px; margin-bottom: 18px; }
         .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
         .cal-nav-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid ${T.border}; background: ${T.surface}; color: #fb7185; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
@@ -648,47 +774,36 @@ export default function App() {
         .legend { display: flex; gap: 14px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid ${T.border}; margin-top: 10px; }
         .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: ${T.textFaint}; }
         .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
-
         .mode-banner { background: linear-gradient(135deg, rgba(236,72,153,0.18), rgba(244,63,94,0.12)); border: 1px solid rgba(236,72,153,0.3); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #fda4af; }
         .cancel-btn { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px 12px; color: ${T.textMuted}; font-size: 12px; cursor: pointer; font-family: inherit; }
-
         .tab-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 420px; background: ${T.tabBg}; backdrop-filter: blur(20px); border-top: 1px solid ${T.border}; display: flex; z-index: 10; }
         .tab { flex: 1; padding: 10px 0 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: none; cursor: pointer; font-family: inherit; color: ${T.textFaint}; font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; transition: color 0.2s; }
         .tab.active { color: #ec4899; }
         .tab-icon { font-size: 18px; line-height: 1; }
-
         .tab-content { padding: 0 0 100px; }
         .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: ${T.textFaint}; margin-bottom: 12px; margin-top: 8px; }
-
-        /* Pattern cards */
         .pattern-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 18px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; position: relative; overflow: hidden; }
         .pattern-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, #ec4899, #fb7185); border-radius: 0 0 0 18px; }
         .pattern-icon { font-size: 22px; flex-shrink: 0; width: 44px; height: 44px; background: rgba(236,72,153,0.12); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
         .pattern-title { font-size: 14px; font-weight: 500; color: ${T.text}; margin-bottom: 4px; }
         .pattern-detail { font-size: 12px; color: ${T.textMuted}; line-height: 1.5; }
-
         .insight-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 18px; padding: 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 14px; }
         .insight-icon { font-size: 22px; flex-shrink: 0; width: 44px; height: 44px; background: rgba(236,72,153,0.12); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
         .insight-title { font-size: 14px; font-weight: 500; color: ${T.text}; margin-bottom: 3px; }
         .insight-sub { font-size: 12px; color: ${T.textMuted}; line-height: 1.5; }
-
         .symptom-row { margin-bottom: 10px; }
         .symptom-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .symptom-name { font-size: 13px; color: ${T.text}; }
         .symptom-count { font-size: 12px; color: ${T.textMuted}; }
         .symptom-bar-bg { background: rgba(236,72,153,0.1); border-radius: 4px; height: 6px; width: 100%; }
         .symptom-bar-fill { background: linear-gradient(90deg, #ec4899, #fb7185); border-radius: 4px; height: 6px; transition: width 0.5s ease; }
-
         .mood-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
         .mood-chip { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 20px; padding: 6px 12px; font-size: 13px; color: ${T.textMuted}; display: flex; align-items: center; gap: 6px; }
-
         .chart-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 18px; padding: 16px; margin-bottom: 16px; }
         .chart-title { font-size: 13px; font-weight: 500; color: ${T.text}; margin-bottom: 4px; }
         .chart-sub { font-size: 11px; color: ${T.textFaint}; margin-bottom: 14px; }
-
         .export-btn { width: 100%; background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 14px; padding: 14px; color: #fb7185; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px; transition: all 0.2s; }
         .export-btn:hover { background: rgba(236,72,153,0.15); }
-
         .settings-card { background: ${T.surface}; border: 1px solid ${T.border}; border-radius: 18px; padding: 16px; margin-bottom: 12px; }
         .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid ${T.border}; }
         .settings-row:last-child { border-bottom: none; padding-bottom: 0; }
@@ -703,7 +818,6 @@ export default function App() {
         .toggle-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
         input:checked + .toggle-slider { background: #ec4899; }
         input:checked + .toggle-slider::before { transform: translateX(20px); }
-
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; }
         .pin-modal { background: ${T.modal}; border: 1px solid ${T.border}; border-radius: 26px; padding: 28px 24px; width: 100%; max-width: 340px; text-align: center; }
         .pin-modal-title { font-family: 'DM Serif Display', serif; font-size: 22px; color: ${T.text}; margin-bottom: 6px; }
@@ -712,7 +826,6 @@ export default function App() {
         .pin-input:focus { border-color: #ec4899; }
         .pin-error { color: #f87171; font-size: 13px; margin-bottom: 12px; min-height: 20px; }
         .pin-actions { display: flex; gap: 10px; }
-
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px); display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
         .modal { background: ${T.modal}; border: 1px solid ${T.border}; border-radius: 26px 26px 0 0; padding: 20px 20px 44px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; }
         .modal-handle { width: 36px; height: 4px; background: rgba(236,72,153,0.25); border-radius: 2px; margin: 0 auto 16px; }
@@ -747,13 +860,9 @@ export default function App() {
           <div className="header-top">
             <span className="logo">Cyra</span>
             <div className="header-actions">
-              <button className="icon-btn" onClick={() => setIsDark(d => !d)} title="Toggle theme">
-                {isDark ? "☀️" : "🌙"}
-              </button>
-              <button className="icon-btn" onClick={() => {
-                if (localStorage.getItem(PIN_KEY)) setPinLocked(true);
-                else setShowSetPin(true);
-              }} title="PIN lock">🔒</button>
+              {saveStatus && <span className="save-badge">{saveStatus === "saving" ? "Saving…" : "✓ Saved"}</span>}
+              <button className="icon-btn" onClick={() => setIsDark(d => !d)} title="Toggle theme">{isDark ? "☀️" : "🌙"}</button>
+              <button className="icon-btn" onClick={() => { if (localStorage.getItem(PIN_KEY)) setPinLocked(true); else setShowSetPin(true); }} title="PIN lock">🔒</button>
               <button className={`log-btn ${markingMode ? "active" : ""}`} onClick={() => { setMarkingMode(true); setRangeStart(null); }}>
                 <span>+</span>{markingMode && !rangeStart ? "Pick start…" : "Log period"}
               </button>
@@ -771,12 +880,16 @@ export default function App() {
 
           {reminders.map((r, i) => (
             <div key={i} className="reminder-banner" style={{ borderColor: `${r.color}33` }}>
-              <span className="reminder-icon">{r.icon}</span>
+              <span style={{ fontSize: 16 }}>{r.icon}</span>
               <span style={{ fontSize: 13, color: r.color }}>{r.text}</span>
             </div>
           ))}
 
-          {/* ── CALENDAR TAB ── */}
+          {dataLoading && (
+            <div style={{ textAlign: "center", padding: "20px", color: "rgba(253,240,245,0.4)", fontSize: 13 }}>Loading your data…</div>
+          )}
+
+          {/* CALENDAR TAB */}
           {activeTab === "calendar" && (
             <>
               <div className="hero">
@@ -864,7 +977,7 @@ export default function App() {
             </>
           )}
 
-          {/* ── SYMPTOMS TAB ── */}
+          {/* SYMPTOMS TAB */}
           {activeTab === "symptoms" && (
             <div className="tab-content">
               <div className="section-title">Mood history</div>
@@ -876,7 +989,7 @@ export default function App() {
                   })}
                 </div>
               ) : (
-                <div className="empty-state"><div className="empty-icon">😊</div>No moods logged yet.<br />Tap any date on the calendar to log how you feel.</div>
+                <div className="empty-state"><div className="empty-icon">😊</div>No moods logged yet.</div>
               )}
               <div className="section-title" style={{ marginTop: 20 }}>Most common symptoms</div>
               {symptomStats.length > 0 ? (
@@ -887,12 +1000,12 @@ export default function App() {
                   </div>
                 ))
               ) : (
-                <div className="empty-state"><div className="empty-icon">💊</div>No symptoms logged yet.<br />Tap any date on the calendar to track symptoms.</div>
+                <div className="empty-state"><div className="empty-icon">💊</div>No symptoms logged yet.</div>
               )}
             </div>
           )}
 
-          {/* ── CHARTS TAB ── */}
+          {/* CHARTS TAB */}
           {activeTab === "charts" && (
             <div className="tab-content">
               <button className="export-btn" onClick={exportCSV}>📤 Export my data as CSV</button>
@@ -943,13 +1056,10 @@ export default function App() {
                   </ResponsiveContainer>
                 </div>
               )}
-              {cycleLengthData.length === 0 && periodDurationData.length === 0 && (
-                <div className="empty-state"><div className="empty-icon">📈</div>Start logging periods and symptoms to see your health charts here.</div>
-              )}
             </div>
           )}
 
-          {/* ── INSIGHTS TAB (now includes patterns) ── */}
+          {/* INSIGHTS TAB */}
           {activeTab === "insights" && (
             <div className="tab-content">
               {patterns.length > 0 && (
@@ -958,77 +1068,35 @@ export default function App() {
                   {patterns.map((p, i) => (
                     <div key={i} className="pattern-card">
                       <div className="pattern-icon">{p.icon}</div>
-                      <div>
-                        <div className="pattern-title">{p.title}</div>
-                        <div className="pattern-detail">{p.detail}</div>
-                      </div>
+                      <div><div className="pattern-title">{p.title}</div><div className="pattern-detail">{p.detail}</div></div>
                     </div>
                   ))}
                 </>
               )}
-
               <div className="section-title" style={{ marginTop: patterns.length > 0 ? 20 : 8 }}>Your cycle insights</div>
               {prediction ? (
                 <>
-                  <div className="insight-card">
-                    <div className="insight-icon">🌸</div>
-                    <div>
-                      <div className="insight-title">Next period</div>
-                      <div className="insight-sub">Expected around {prediction.date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
-                    </div>
-                  </div>
-                  <div className="insight-card">
-                    <div className="insight-icon">🌿</div>
-                    <div>
-                      <div className="insight-title">Fertile window</div>
-                      <div className="insight-sub">
-                        Around {(() => { const d = new Date(prediction.date); d.setDate(d.getDate() - 16); return d.toLocaleDateString("en-US", { month: "long", day: "numeric" }); })()} — {(() => { const d = new Date(prediction.date); d.setDate(d.getDate() - 12); return d.toLocaleDateString("en-US", { month: "long", day: "numeric" }); })()}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="insight-card">
-                    <div className="insight-icon">💯</div>
-                    <div>
-                      <div className="insight-title">Health Score: <span style={{ color: scoreColor }}>{healthScore}/100 — {scoreLabel}</span></div>
-                      <div className="insight-sub">{scoreTip}</div>
-                    </div>
-                  </div>
-                  <div className="insight-card">
-                    <div className="insight-icon">📊</div>
-                    <div>
-                      <div className="insight-title">Average cycle length</div>
-                      <div className="insight-sub">{prediction.cycleLength} days based on {data.periods.length} logged cycles</div>
-                    </div>
-                  </div>
-                  <div className="insight-card">
-                    <div className="insight-icon">💧</div>
-                    <div>
-                      <div className="insight-title">Total period days</div>
-                      <div className="insight-sub">{periodDates.size} days logged across all cycles</div>
-                    </div>
-                  </div>
-                  {symptomStats.length > 0 && (
-                    <div className="insight-card">
-                      <div className="insight-icon">💊</div>
-                      <div>
-                        <div className="insight-title">Most common symptom</div>
-                        <div className="insight-sub">{symptomStats[0][0]} — reported {symptomStats[0][1]} {symptomStats[0][1] === 1 ? "time" : "times"}</div>
-                      </div>
-                    </div>
-                  )}
+                  <div className="insight-card"><div className="insight-icon">🌸</div><div><div className="insight-title">Next period</div><div className="insight-sub">Expected around {prediction.date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div></div></div>
+                  <div className="insight-card"><div className="insight-icon">💯</div><div><div className="insight-title">Health Score: <span style={{ color: scoreColor }}>{healthScore}/100 — {scoreLabel}</span></div><div className="insight-sub">{scoreTip}</div></div></div>
+                  <div className="insight-card"><div className="insight-icon">📊</div><div><div className="insight-title">Average cycle length</div><div className="insight-sub">{prediction.cycleLength} days based on {data.periods.length} logged cycles</div></div></div>
+                  {symptomStats.length > 0 && <div className="insight-card"><div className="insight-icon">💊</div><div><div className="insight-title">Most common symptom</div><div className="insight-sub">{symptomStats[0][0]} — reported {symptomStats[0][1]} times</div></div></div>}
                 </>
               ) : (
-                <div className="empty-state">
-                  <div className="empty-icon">🌸</div>
-                  Log at least 2 periods to unlock predictions, patterns, and personal insights.
-                </div>
+                <div className="empty-state"><div className="empty-icon">🌸</div>Log at least 2 periods to unlock predictions, patterns, and insights.</div>
               )}
             </div>
           )}
 
-          {/* ── SETTINGS TAB ── */}
+          {/* SETTINGS TAB */}
           {activeTab === "settings" && (
             <div className="tab-content">
+              <div className="section-title">Account</div>
+              <div className="settings-card">
+                <div className="settings-row">
+                  <div><div className="settings-label">Signed in as</div><div className="settings-sub">{user?.email}</div></div>
+                  <button className="settings-btn danger" onClick={handleSignOut}>Sign out</button>
+                </div>
+              </div>
               <div className="section-title">Appearance</div>
               <div className="settings-card">
                 <div className="settings-row">
@@ -1039,12 +1107,12 @@ export default function App() {
               <div className="section-title">Privacy</div>
               <div className="settings-card">
                 <div className="settings-row">
-                  <div><div className="settings-label">PIN Lock</div><div className="settings-sub">{localStorage.getItem(PIN_KEY) ? "PIN is set — app is protected" : "No PIN set"}</div></div>
+                  <div><div className="settings-label">PIN Lock</div><div className="settings-sub">{localStorage.getItem(PIN_KEY) ? "PIN is set" : "No PIN set"}</div></div>
                   <button className="settings-btn" onClick={() => setShowSetPin(true)}>{localStorage.getItem(PIN_KEY) ? "Change PIN" : "Set PIN"}</button>
                 </div>
                 {localStorage.getItem(PIN_KEY) && (
                   <div className="settings-row">
-                    <div><div className="settings-label">Remove PIN</div><div className="settings-sub">Disable lock screen</div></div>
+                    <div><div className="settings-label">Remove PIN</div></div>
                     <button className="settings-btn danger" onClick={removePin}>Remove</button>
                   </div>
                 )}
@@ -1057,10 +1125,10 @@ export default function App() {
                 </div>
                 <div className="settings-row">
                   <div><div className="settings-label">Clear all data</div><div className="settings-sub">Permanently delete everything</div></div>
-                  <button className="settings-btn danger" onClick={() => {
+                  <button className="settings-btn danger" onClick={async () => {
                     if (window.confirm("Delete all Cyra data? This cannot be undone.")) {
-                      localStorage.removeItem(STORAGE_KEY);
-                      setData({ periods: [], notes: {}, moods: {}, flows: {}, symptoms: {} });
+                      await supabase.from("cyra_data").delete().eq("user_id", user.id);
+                      setData(EMPTY_DATA);
                     }
                   }}>Clear</button>
                 </div>
@@ -1068,7 +1136,7 @@ export default function App() {
               <div className="section-title">About</div>
               <div className="settings-card">
                 <div className="settings-row">
-                  <div><div className="settings-label">Cyra</div><div className="settings-sub">Your cycle, your way · v1.0</div></div>
+                  <div><div className="settings-label">Cyra</div><div className="settings-sub">Your cycle, your way · v2.0</div></div>
                   <span style={{ fontSize: 20 }}>🌸</span>
                 </div>
               </div>
@@ -1076,7 +1144,6 @@ export default function App() {
           )}
         </div>
 
-        {/* Tab bar */}
         <div className="tab-bar">
           {[["calendar","🗓","Calendar"],["symptoms","🌡","Symptoms"],["charts","📊","Charts"],["insights","🌸","Insights"],["settings","⚙️","Settings"]].map(([id, icon, label]) => (
             <button key={id} className={`tab ${activeTab === id ? "active" : ""}`} onClick={() => setActiveTab(id)}>
@@ -1085,7 +1152,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Daily log modal */}
         {showModal && (
           <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
@@ -1123,7 +1189,6 @@ export default function App() {
           </div>
         )}
 
-        {/* PIN setup modal */}
         {showSetPin && (
           <div className="overlay" onClick={() => { setShowSetPin(false); setNewPin(""); setConfirmPin(""); setPinStep(1); setPinError(""); }}>
             <div className="pin-modal" onClick={e => e.stopPropagation()}>
