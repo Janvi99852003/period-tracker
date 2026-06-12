@@ -9,6 +9,8 @@ const EMAILJS_SERVICE_ID = "service_lav9x6f";
 const EMAILJS_TEMPLATE_ID = "template_6h1yzki";
 const EMAILJS_PUBLIC_KEY = "tGIwLpEP3JPSuHwbM";
 
+const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
+
 function toDateStr(date) { return date.toISOString().split("T")[0]; }
 function getDaysInMonth(year, month) { return new Date(year, month + 1, 0).getDate(); }
 function getFirstDayOfMonth(year, month) { return new Date(year, month, 1).getDay(); }
@@ -142,6 +144,36 @@ function detectPatterns(data) {
       patterns.push({ icon: "⏱️", title: "Very consistent period duration", detail: `Your periods consistently last around ${Math.round(avg)} days.`, type: "duration" });
   }
   return patterns;
+}
+
+// ── Gemini AI helper ─────────────────────────────────────────────────────
+async function askGemini(userMessage, context) {
+  const prompt = `${context}\n\nUser question: ${userMessage}\n\nAnswer as a friendly health assistant. Keep it concise (3-4 sentences). Always recommend consulting a doctor for serious concerns.`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    console.error("Gemini API error:", response.status, errText);
+    throw new Error("Gemini API error");
+  }
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("No response from Gemini");
+  return text;
 }
 
 // ── Auth Screen ───────────────────────────────────────────────────────────
@@ -373,6 +405,113 @@ function AuthScreen({ onAuth }) {
   );
 }
 
+// ── AI Assistant Tab ──────────────────────────────────────────────────────
+function AssistantTab({ prediction, symptomStats, moodStats, healthScore, T }) {
+  const [messages, setMessages] = useState([
+    { role: "assistant", text: "Hi! I'm Cyra's AI assistant. Ask me anything about your cycle, symptoms, or general health questions. 🌸" }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSend() {
+    const question = input.trim();
+    if (!question || loading) return;
+
+    setMessages(prev => [...prev, { role: "user", text: question }]);
+    setInput("");
+    setError("");
+    setLoading(true);
+
+    const context = `
+User's average cycle length: ${prediction?.cycleLength || "unknown"} days
+Most common symptom: ${symptomStats[0]?.[0] || "none logged"}
+Recent mood pattern: ${moodStats[0]?.[0] || "none logged"}
+Health score: ${healthScore !== null ? healthScore : "not yet calculated"}/100
+`.trim();
+
+    try {
+      const reply = await askGemini(question, context);
+      setMessages(prev => [...prev, { role: "assistant", text: reply }]);
+    } catch (err) {
+      setError("Sorry, I couldn't get a response. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="tab-content">
+      <div className="section-title">🤖 Ask Cyra</div>
+      <div style={{
+        background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18,
+        padding: 14, marginBottom: 12, maxHeight: 380, overflowY: "auto",
+        display: "flex", flexDirection: "column", gap: 10
+      }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{
+            alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+            maxWidth: "85%",
+            background: m.role === "user"
+              ? "linear-gradient(135deg,#ec4899,#be185d)"
+              : "rgba(236,72,153,0.08)",
+            color: m.role === "user" ? "#fff" : T.text,
+            border: m.role === "user" ? "none" : `1px solid ${T.border}`,
+            borderRadius: 14,
+            padding: "10px 14px",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}>
+            {m.text}
+          </div>
+        ))}
+        {loading && (
+          <div style={{ alignSelf: "flex-start", fontSize: 12, color: T.textFaint }}>
+            Cyra is thinking…
+          </div>
+        )}
+      </div>
+      {error && (
+        <div style={{
+          background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)",
+          borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "#f87171", marginBottom: 10
+        }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          style={{
+            flex: 1, background: T.surface, border: `1px solid ${T.border}`,
+            borderRadius: 12, padding: "12px 14px", color: T.text,
+            fontFamily: "inherit", fontSize: 14, outline: "none"
+          }}
+          type="text"
+          placeholder="Ask about your cycle, symptoms…"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleSend()}
+        />
+        <button
+          onClick={handleSend}
+          disabled={loading || !input.trim()}
+          style={{
+            background: "linear-gradient(135deg,#ec4899,#be185d)", color: "#fff",
+            border: "none", borderRadius: 12, padding: "0 18px", fontSize: 14,
+            fontWeight: 500, cursor: (loading || !input.trim()) ? "not-allowed" : "pointer",
+            fontFamily: "inherit", opacity: (loading || !input.trim()) ? 0.6 : 1
+          }}
+        >
+          Send
+        </button>
+      </div>
+      <div style={{ fontSize: 11, color: T.textFaint, marginTop: 8, lineHeight: 1.5 }}>
+        Cyra is an AI assistant and not a substitute for professional medical advice.
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────
 export default function App() {
   const today = new Date();
@@ -508,13 +647,6 @@ export default function App() {
       if (today >= fertileStart && today <= fertileEnd)
         reminders.push({ icon: "🌿", text: "You're in your fertile window", color: "#34d399" });
     }
-    let lastLog = null;
-    for (let i = 0; i <= 10; i++) {
-      const d = new Date(today); d.setDate(d.getDate() - i);
-      const ds = toDateStr(d);
-      if (data.moods?.[ds] || (data.symptoms?.[ds] || []).length > 0) { lastLog = i; break; }
-    }
-    if (lastLog === null || lastLog >= 3) reminders.push({ icon: "📝", text: "You haven't logged in 3+ days", color: "#fbbf24" });
     return reminders;
   }
 
@@ -951,6 +1083,16 @@ export default function App() {
             </div>
           )}
 
+          {activeTab==="assistant" && (
+            <AssistantTab
+              prediction={prediction}
+              symptomStats={symptomStats}
+              moodStats={moodStats}
+              healthScore={healthScore}
+              T={T}
+            />
+          )}
+
           {activeTab==="settings" && (
             <div className="tab-content">
               <div className="section-title">Account</div>
@@ -1013,7 +1155,7 @@ export default function App() {
         </div>
 
         <div className="tab-bar">
-          {[["calendar","🗓","Calendar"],["symptoms","🌡","Symptoms"],["charts","📊","Charts"],["insights","🌸","Insights"],["settings","⚙️","Settings"]].map(([id,icon,label])=>(
+          {[["calendar","🗓","Calendar"],["symptoms","🌡","Symptoms"],["charts","📊","Charts"],["insights","🌸","Insights"],["assistant","🤖","Assistant"],["settings","⚙️","Settings"]].map(([id,icon,label])=>(
             <button key={id} className={`tab${activeTab===id?" active":""}`} onClick={()=>setActiveTab(id)}>
               <span className="tab-icon">{icon}</span>{label}
             </button>

@@ -36,6 +36,24 @@ jest.mock("./supabase", () => ({
   },
 }));
 
+// Mock the global fetch used by the Gemini AI Assistant tab
+beforeAll(() => {
+  global.fetch = jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        candidates: [
+          { content: { parts: [{ text: "This is a mocked Gemini response." }] } }
+        ]
+      }),
+    })
+  );
+});
+
+afterAll(() => {
+  delete global.fetch;
+});
+
 import App from "./App";
 
 beforeEach(() => { localStorage.clear(); });
