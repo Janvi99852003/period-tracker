@@ -10,7 +10,10 @@ jest.mock("recharts", () => ({
 }));
 
 jest.mock("@emailjs/browser", () => ({
-  send: () => Promise.resolve({ status: 200, text: "OK" }),
+  __esModule: true,
+  default: {
+    send: () => Promise.resolve({ status: 200, text: "OK" }),
+  },
 }));
 
 jest.mock("./supabase", () => ({
@@ -36,7 +39,6 @@ jest.mock("./supabase", () => ({
   },
 }));
 
-// Mock the global fetch used by the Gemini AI Assistant tab
 beforeAll(() => {
   global.fetch = jest.fn(() =>
     Promise.resolve({

@@ -1,194 +1,150 @@
-# 🌸 Cyra — Period & Cycle Tracker
+# 🌸 Cyra — Period Tracker
 
-> **Your cycle, your way.** A smart, private period tracking app built with React.
+> Your cycle, your way.
 
-[![CI/CD](https://github.com/YOUR_USERNAME/period-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/period-tracker/actions)
-[![Live Demo](https://img.shields.io/badge/demo-live-ec4899)](https://YOUR_APP.vercel.app)
+A full-stack AI-powered period tracking web app built with React, Supabase, Gemini AI, and EmailJS.
 
----
-
-## 🔗 Live Demo
-**[cyra.vercel.app](https://YOUR_APP.vercel.app)** — try it in your browser, no account needed.
+🔗 **Live Demo:** [cyra-app.vercel.app](https://cyra-app.vercel.app)
 
 ---
 
 ## ✨ Features
 
-### 📅 Period Tracking
-- Two-click period logging on an interactive calendar
-- Visual period, prediction, and fertile window markers
-- Navigate across months with smooth calendar navigation
-
-### 🔮 Cycle Prediction Algorithm
-- Averages gaps between past cycles to predict the next period
-- Calculates ovulation and fertile window automatically
-- Shows a live countdown: *"Next period in 12 days"*
-
-### 💯 Health Score Engine
-- Scores your cycle health 0–100 across 4 factors: logging consistency, cycle regularity, mood pattern, and symptom load
-- Animated SVG ring with colour coding (green / yellow / red)
-- Personalised tip based on what's dragging your score down
-
-### 🔍 Pattern Detection
-- Automatically detects trends like *"Your cycle is getting shorter"*
-- Finds recurring symptoms on specific cycle days (*"Cramps often on Day 2"*)
-- Detects pre-period mood patterns (*"You tend to feel Irritable before your period"*)
-- Identifies heaviest flow days and consistent period durations
-
-### 😊 Daily Health Log
-- Mood tracker with 5 emoji moods
-- 8 symptom tags (Cramps, Bloating, Headache, Fatigue, and more)
-- Flow intensity: Light / Medium / Heavy
-- Personal notes on any date
-
-### 📊 Data Visualisation
-- Cycle length line chart over time (Recharts)
-- Period duration bar chart
-- Flow intensity distribution chart
-- Symptom frequency bar chart with ranking
-
-### 🔒 Privacy & Security
-- 4-digit PIN lock screen with numeric keypad
-- All data stored locally — never leaves the device
-- One-click data export as CSV
-- Clear all data option
-
-### 🔔 Smart Reminders
-- Period due soon banner (3 days before)
-- Fertile window alert
-- Logging reminder if inactive for 3+ days
-
-### ⚙️ Settings
-- Dark / Light mode toggle (persisted across sessions)
-- PIN management (set, change, remove)
-- CSV data export
-- Clear all data
+- 📅 **Calendar view** — log and visualize period days, predicted days, and fertile window
+- 🤖 **AI Assistant** — ask health questions powered by Google Gemini 2.5 Flash
+- 📊 **Charts & Analytics** — cycle length trends, period duration, flow intensity
+- 🔍 **Pattern Detection** — automatically detects mood, symptom, and cycle trends
+- 💯 **Health Score** — dynamic score based on logging consistency, mood, and regularity
+- 🔐 **Auth** — email/password login + OTP sign-up via EmailJS (no password needed)
+- 🔑 **Forgot Password** — password reset via Supabase email
+- 📧 **Period Alerts** — email notifications 1 day before predicted period
+- 🌙 **Dark / Light mode** — theme toggle with localStorage persistence
+- 📤 **CSV Export** — download all tracked data
+- ☁️ **Cloud sync** — data stored in Supabase Firestore per user
 
 ---
 
 ## 🛠 Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | React 18 (hooks only, no class components) |
-| Charts | Recharts |
-| Styling | CSS-in-JS (inline `<style>` with theme tokens) |
-| Storage | localStorage (client-side persistence) |
-| Icons | Lucide React |
-| Testing | Jest + React Testing Library |
+|---|---|
+| Frontend | React 18, Recharts |
+| Auth + DB | Supabase (Auth + Firestore) |
+| AI | Google Gemini 2.5 Flash API |
+| Email OTP | EmailJS |
+| Styling | CSS-in-JS (inline + injected styles) |
 | CI/CD | GitHub Actions |
-| Hosting | Vercel (auto-deploy on push to main) |
-
----
-
-## 🏗 Architecture Decisions
-
-**Why localStorage over a backend?**
-For a period tracker, keeping sensitive health data on the user's device by default is a deliberate privacy choice. A Firebase backend is planned for Day 6 to support multi-device sync for users who opt in.
-
-**Why a custom prediction algorithm over a library?**
-The weighted-average cycle prediction is simple enough to implement cleanly in ~15 lines and is fully explainable. Third-party health libraries add dependency risk without meaningful accuracy gains for this use case.
-
-**Why Recharts over D3?**
-Recharts provides declarative, React-idiomatic chart components that integrate cleanly with React state. D3 would require imperative DOM manipulation that fights against React's rendering model.
+| Hosting | Vercel |
 
 ---
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- Node.js 18+
-- npm
-
-### Installation
+### 1. Clone the repo
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/period-tracker.git
-cd period-tracker
+git clone https://github.com/YOUR_USERNAME/cyra-app.git
+cd cyra-app
+```
+
+### 2. Install dependencies
+
+```bash
 npm install
+```
+
+### 3. Set up environment variables
+
+Create a `.env` file in the root:
+
+```env
+REACT_APP_GEMINI_API_KEY=your_gemini_api_key
+```
+
+### 4. Set up Supabase
+
+- Create a project at [supabase.com](https://supabase.com)
+- Run this SQL in the SQL editor:
+
+```sql
+CREATE TABLE cyra_data (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id),
+  periods JSONB DEFAULT '[]',
+  notes JSONB DEFAULT '{}',
+  moods JSONB DEFAULT '{}',
+  flows JSONB DEFAULT '{}',
+  symptoms JSONB DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE cyra_data ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own data" ON cyra_data
+  FOR ALL USING (auth.uid() = user_id);
+```
+
+- Update `src/supabase.js` with your project URL and anon key
+
+### 5. Run locally
+
+```bash
 npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### Running Tests
+### 6. Run tests
 
 ```bash
 npm test -- --watchAll=false
 ```
 
-### Building for Production
-
-```bash
-npm run build
-```
-
 ---
 
-## ⚙️ CI/CD Pipeline
+## 📦 Deployment
 
-Every push to `main` triggers a GitHub Actions workflow:
+This project uses **GitHub Actions** for CI/CD and deploys automatically to **Vercel** on every push to `main`.
 
-```
-Push to main
-    │
-    ▼
-[Test & Build]
-  • npm install
-  • npm test
-  • npm run build
-    │
-    ▼ (only if tests pass)
-[Deploy]
-  • Auto-deploy to Vercel
-  • Live URL updates in ~60 seconds
-```
+### Required GitHub Secrets
 
-Pull requests run tests only — never deploy to production.
+| Secret | Description |
+|---|---|
+| `VERCEL_TOKEN` | Your Vercel API token |
+| `VERCEL_ORG_ID` | Your Vercel org ID |
+| `VERCEL_PROJECT_ID` | Your Vercel project ID |
+| `REACT_APP_GEMINI_API_KEY` | Google Gemini API key |
 
 ---
 
 ## 📁 Project Structure
 
 ```
-period-tracker/
-├── .github/
-│   └── workflows/
-│       └── ci.yml          # GitHub Actions pipeline
-├── src/
-│   ├── App.js              # Main app (single-file architecture)
-│   ├── App.test.js         # Jest + RTL tests
-│   └── index.js            # React entry point
-├── public/
-│   └── index.html          # HTML shell
-└── package.json
+src/
+├── App.js          # Main app + all components
+├── App.test.js     # Jest + React Testing Library tests
+├── supabase.js     # Supabase client config
+└── index.js        # React entry point
 ```
 
 ---
 
-## 🗺 Roadmap
+## 🗓 Built In 8 Days
 
-- [x] Calendar UI with period logging
-- [x] Cycle prediction algorithm
-- [x] Symptoms, mood, and flow tracking
-- [x] Recharts data visualisation
-- [x] Health Score engine
-- [x] Pattern detection
-- [x] PIN lock and privacy controls
-- [x] Dark / light mode
-- [x] CSV export
-- [x] CI/CD pipeline
-- [ ] Firebase authentication
-- [ ] Firestore cloud sync
-- [ ] Gemini AI health assistant
-- [ ] Push notifications
+| Day | Feature |
+|---|---|
+| Day 1 | React setup, calendar UI, period logging |
+| Day 2 | Mood & symptom logging, notes modal |
+| Day 3 | Predictions, fertile window, health score |
+| Day 4 | Charts (Recharts), CSV export |
+| Day 5 | Pattern detection, splash screen, README |
+| Day 6 | Supabase auth + cloud database |
+| Day 7 | Gemini AI assistant, EmailJS OTP |
+| Day 8 | CI/CD pipeline, Vercel deployment, polish |
 
 ---
 
-## 👩‍💻 Author
+## 📄 License
 
-Built by **[JANVI JAISWAL]** · [LinkedIn](https://www.linkedin.com/in/janvi-jaiswal-72415b307/) · [GitHub](https://github.com/Janvi99852003)
+MIT — free to use and modify.
 
 ---
 
-<p align="center">Made with 🌸 and React</p>
+Built by [Janvi Jaiswal](https://github.com/Janvi99852003) · VIT Bhopal
