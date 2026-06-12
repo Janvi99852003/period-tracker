@@ -1,40 +1,115 @@
-# 🌸 Cyra — Period Tracker
+# 🌸 Cyra — AI-Powered Period Tracker
 
 > Your cycle, your way.
 
-A full-stack AI-powered period tracking web app built with React, Supabase, Gemini AI, and EmailJS.
+A full-stack AI-powered period tracking web app built in 8 days as a structured learning challenge. Cyra combines React, Supabase, Google Gemini AI, and EmailJS into a production-ready application with CI/CD deployment on Vercel.
 
-🔗 **Live Demo:** [cyra-app.vercel.app](https://cyra-app.vercel.app)
+🔗 **Live Demo:** [period-tracker-wheat.vercel.app](https://period-tracker-wheat.vercel.app)
 
 ---
 
 ## ✨ Features
 
-- 📅 **Calendar view** — log and visualize period days, predicted days, and fertile window
-- 🤖 **AI Assistant** — ask health questions powered by Google Gemini 2.5 Flash
-- 📊 **Charts & Analytics** — cycle length trends, period duration, flow intensity
-- 🔍 **Pattern Detection** — automatically detects mood, symptom, and cycle trends
-- 💯 **Health Score** — dynamic score based on logging consistency, mood, and regularity
-- 🔐 **Auth** — email/password login + OTP sign-up via EmailJS (no password needed)
-- 🔑 **Forgot Password** — password reset via Supabase email
-- 📧 **Period Alerts** — email notifications 1 day before predicted period
-- 🌙 **Dark / Light mode** — theme toggle with localStorage persistence
-- 📤 **CSV Export** — download all tracked data
-- ☁️ **Cloud sync** — data stored in Supabase Firestore per user
+### Core Tracking
+- 📅 **Calendar View** — log period days with start/end range selection
+- 🔮 **Cycle Prediction** — predicts next period and fertile window based on logged history
+- 🌿 **Fertile Window** — highlights estimated ovulation days on calendar
+- 💯 **Health Score** — dynamic 0–100 score based on logging consistency, mood patterns, and cycle regularity
+
+### Logging & Insights
+- 😊 **Mood Logging** — log daily mood with emoji indicators on calendar
+- 💊 **Symptom Tracking** — log 8 common symptoms per day with frequency charts
+- 🌊 **Flow Intensity** — track Light / Medium / Heavy flow per period day
+- 📝 **Daily Notes** — add free-text notes to any calendar date
+- 🔍 **Pattern Detection** — auto-detects mood trends, symptom patterns, and cycle length changes
+
+### AI & Communication
+- 🤖 **AI Assistant** — Gemini 2.5 Flash powered chat for cycle and health questions
+- 📧 **Period Alert Emails** — email notification 1 day before predicted period via Supabase Edge Functions
+- 🔐 **OTP Sign Up** — passwordless account creation via 6-digit email OTP (EmailJS)
+
+### Auth & Security
+- 🔑 **Email/Password Auth** — full sign in / sign up via Supabase Auth
+- 🔒 **Forgot Password** — password reset via Supabase email
+- ✨ **OTP Sign Up** — no-password account creation with 6-digit email code
+- 🛡️ **Row Level Security** — Supabase RLS ensures users only access their own data
+
+### UI & UX
+- 🌙 **Dark / Light Mode** — theme toggle with localStorage persistence
+- 💾 **Cloud Sync** — all data saved to Supabase and synced across devices
+- 📤 **CSV Export** — download all tracked data as a spreadsheet
+- 📱 **Mobile-First Design** — responsive layout optimized for phone screens
 
 ---
 
 ## 🛠 Tech Stack
 
-| Layer | Technology |
+### Frontend
+| Technology | Purpose |
 |---|---|
-| Frontend | React 18, Recharts |
-| Auth + DB | Supabase (Auth + Firestore) |
-| AI | Google Gemini 2.5 Flash API |
-| Email OTP | EmailJS |
-| Styling | CSS-in-JS (inline + injected styles) |
-| CI/CD | GitHub Actions |
-| Hosting | Vercel |
+| React 18 | UI framework |
+| Recharts | Cycle length, duration, and flow charts |
+| CSS-in-JS | Inline + injected styles, no external CSS library |
+| Google Fonts (DM Sans + DM Serif Display) | Typography |
+
+### Backend & Services
+| Technology | Purpose |
+|---|---|
+| Supabase Auth | Email/password login, password reset, session management |
+| Supabase PostgreSQL | Cloud database with Row Level Security |
+| Supabase Edge Functions | Period alert email trigger (Deno runtime) |
+| Google Gemini 2.5 Flash API | AI assistant for cycle and health questions |
+| EmailJS | Sending 6-digit OTP codes for passwordless sign up |
+
+### DevOps
+| Technology | Purpose |
+|---|---|
+| GitHub Actions | CI/CD pipeline — runs tests and deploys on every push |
+| Vercel | Production hosting with automatic preview deployments |
+| React Testing Library + Jest | Unit and integration tests |
+
+---
+
+## 🗄️ Database Schema
+
+```sql
+CREATE TABLE cyra_data (
+  user_id    UUID PRIMARY KEY REFERENCES auth.users(id),
+  periods    JSONB DEFAULT '[]',
+  notes      JSONB DEFAULT '{}',
+  moods      JSONB DEFAULT '{}',
+  flows      JSONB DEFAULT '{}',
+  symptoms   JSONB DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE cyra_data ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own data" ON cyra_data
+  FOR ALL USING (auth.uid() = user_id);
+```
+
+---
+
+## 🏗️ Project Structure
+
+```
+period-tracker/
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml          # GitHub Actions CI/CD pipeline
+├── public/
+│   └── index.html
+├── src/
+│   ├── App.js                 # Main app — all components
+│   ├── App.test.js            # Jest + React Testing Library tests
+│   ├── supabase.js            # Supabase client configuration
+│   ├── index.js               # React entry point
+│   └── index.css              # Global styles
+├── .env                       # Environment variables (gitignored)
+├── package.json
+└── README.md
+```
 
 ---
 
@@ -43,8 +118,8 @@ A full-stack AI-powered period tracking web app built with React, Supabase, Gemi
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/cyra-app.git
-cd cyra-app
+git clone https://github.com/Janvi99852003/period-tracker.git
+cd period-tracker
 ```
 
 ### 2. Install dependencies
@@ -58,40 +133,30 @@ npm install
 Create a `.env` file in the root:
 
 ```env
-REACT_APP_GEMINI_API_KEY=your_gemini_api_key
+REACT_APP_GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 ### 4. Set up Supabase
 
-- Create a project at [supabase.com](https://supabase.com)
-- Run this SQL in the SQL editor:
+1. Create a project at [supabase.com](https://supabase.com)
+2. Run the SQL schema above in the SQL Editor
+3. Enable Email provider in Authentication → Sign In / Providers
+4. Update `src/supabase.js` with your project URL and anon key
 
-```sql
-CREATE TABLE cyra_data (
-  user_id UUID PRIMARY KEY REFERENCES auth.users(id),
-  periods JSONB DEFAULT '[]',
-  notes JSONB DEFAULT '{}',
-  moods JSONB DEFAULT '{}',
-  flows JSONB DEFAULT '{}',
-  symptoms JSONB DEFAULT '{}',
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+### 5. Set up EmailJS
 
-ALTER TABLE cyra_data ENABLE ROW LEVEL SECURITY;
+1. Create account at [emailjs.com](https://emailjs.com)
+2. Connect Gmail as an email service
+3. Create a template with `{{otp_code}}` variable
+4. Update the constants at the top of `src/App.js`
 
-CREATE POLICY "Users can manage own data" ON cyra_data
-  FOR ALL USING (auth.uid() = user_id);
-```
-
-- Update `src/supabase.js` with your project URL and anon key
-
-### 5. Run locally
+### 6. Run locally
 
 ```bash
 npm start
 ```
 
-### 6. Run tests
+### 7. Run tests
 
 ```bash
 npm test -- --watchAll=false
@@ -99,29 +164,31 @@ npm test -- --watchAll=false
 
 ---
 
-## 📦 Deployment
+## 🔄 CI/CD Pipeline
 
-This project uses **GitHub Actions** for CI/CD and deploys automatically to **Vercel** on every push to `main`.
+Every push to `main` triggers:
+
+```
+Push to main → Test & Build → Deploy to Vercel
+```
 
 ### Required GitHub Secrets
 
 | Secret | Description |
 |---|---|
-| `VERCEL_TOKEN` | Your Vercel API token |
-| `VERCEL_ORG_ID` | Your Vercel org ID |
-| `VERCEL_PROJECT_ID` | Your Vercel project ID |
+| `VERCEL_TOKEN` | Vercel API token |
+| `VERCEL_ORG_ID` | Vercel organization ID |
+| `VERCEL_PROJECT_ID` | Vercel project ID |
 | `REACT_APP_GEMINI_API_KEY` | Google Gemini API key |
 
 ---
 
-## 📁 Project Structure
+## 🧪 Tests
 
-```
-src/
-├── App.js          # Main app + all components
-├── App.test.js     # Jest + React Testing Library tests
-├── supabase.js     # Supabase client config
-└── index.js        # React entry point
+10 tests covering renders, auth screens, OTP flow, and Gemini mock:
+
+```bash
+npm test -- --watchAll=false
 ```
 
 ---
@@ -131,20 +198,25 @@ src/
 | Day | Feature |
 |---|---|
 | Day 1 | React setup, calendar UI, period logging |
-| Day 2 | Mood & symptom logging, notes modal |
-| Day 3 | Predictions, fertile window, health score |
-| Day 4 | Charts (Recharts), CSV export |
-| Day 5 | Pattern detection, splash screen, README |
-| Day 6 | Supabase auth + cloud database |
-| Day 7 | Gemini AI assistant, EmailJS OTP |
-| Day 8 | CI/CD pipeline, Vercel deployment, polish |
+| Day 2 | Mood & symptom logging, daily notes, flow intensity |
+| Day 3 | Cycle predictions, fertile window, health score |
+| Day 4 | Recharts visualizations, CSV export, pattern detection |
+| Day 5 | Splash screen, dark/light theme, README |
+| Day 6 | Supabase auth + cloud database, Row Level Security |
+| Day 7 | Gemini AI assistant, EmailJS OTP, period alert emails |
+| Day 8 | Vercel deployment, GitHub Actions CI/CD, production polish |
+
+---
+
+## 👩‍💻 Author
+
+**Janvi Jaiswal**
+- 📧 janvi.23bce10174@vitbhopal.ac.in
+- 🎓 B.Tech CSE, VIT Bhopal University
+- 💼 [GitHub](https://github.com/Janvi99852003)
 
 ---
 
 ## 📄 License
 
 MIT — free to use and modify.
-
----
-
-Built by [Janvi Jaiswal](https://github.com/Janvi99852003) · VIT Bhopal
