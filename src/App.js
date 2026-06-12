@@ -465,6 +465,7 @@ export default function App() {
       }).then(() => localStorage.setItem("cyra_alert_check", todayStr))
         .catch(err => console.log("Alert email skipped:", err));
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, data, alertEnabled]);
 
   function getPrediction(d = data) {
